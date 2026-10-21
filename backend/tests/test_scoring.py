@@ -13,6 +13,14 @@ def test_junit_all_pass():
 def test_tap():
     assert parse_tap(TAP) == 75.0
 
+def test_junit_malformed_xml_scores_zero_not_crash():
+    # Regression: unparseable scorer output must score 0, not 500 the submit.
+    assert parse_junit_xml("<testsuite tests='5' NOT-XML") == 0.0
+    assert parse_junit_xml("not xml at all") == 0.0
+
+def test_junit_nonnumeric_counts_score_zero_not_crash():
+    assert parse_junit_xml('<testsuite tests="five" failures="0"/>') == 0.0
+
 def test_fs_score():
     assert parse_fs_score("done\nFS_SCORE: 60%\n") == 60.0
 

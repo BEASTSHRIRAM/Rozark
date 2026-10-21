@@ -2,10 +2,16 @@ from __future__ import annotations
 import re, xml.etree.ElementTree as ET
 from .models import DimensionScore, SessionEvent, EventType
 
+def _safe_count(value) -> int:
+    """Parse a JUnit count attribute; anything unparseable/negative is 0."""
+    try: return max(0, int(value))
+    except (TypeError, ValueError): return 0
+
 def parse_junit_xml(xml_text: str) -> float:
     """Return 0-100 proportional score from JUnit/xUnit-style XML."""
     if not xml_text or not xml_text.strip(): return 0.0
-    root=ET.fromstring(xml_text)
+    try: root=ET.fromstring(xml_text)
+    except ET.ParseError: return 0.0
     suites=[root] if root.tag=="testsuite" else list(root.iter("testsuite"))
     # xUnit assemblies fallback: count test elements with result attr
     if not suites:
@@ -16,7 +22,7 @@ def parse_junit_xml(xml_text: str) -> float:
         return 0.0
     total=fail=err=skip=0
     for s in suites:
-        total+=int(s.get("tests",0)); fail+=int(s.get("failures",0)); err+=int(s.get("errors",0)); skip+=int(s.get("skipped",0))
+        total+=_safe_count(s.get("tests",0)); fail+=_safe_count(s.get("failures",0)); err+=_safe_count(s.get("errors",0)); skip+=_safe_count(s.get("skipped",0))
     if total==0:
         cases=list(root.iter("testcase"))
         if not cases: return 0.0

@@ -103,12 +103,24 @@ def git_snapshot(workspace: str, snapshot_id: str, reason: str = "interval") -> 
     return the git_snapshot event payload (or None if git fails)."""
     try:
         subprocess.run(["git", "-C", workspace, "add", "-A"], check=True, capture_output=True)
-        subprocess.run(["git", "-C", workspace, "commit", "-q", "--allow-empty",
+        # Identity is passed per-command: the challenge container's candidate
+        # user has no git config, and `git commit` fails without one.
+        subprocess.run(["git", "-C", workspace,
+                        "-c", "user.name=rozark-sidecar", "-c", "user.email=sidecar@rozark.local",
+                        "commit", "-q", "--allow-empty",
                         "-m", f"rozark snapshot {snapshot_id}"], check=True, capture_output=True)
         ref = subprocess.run(["git", "-C", workspace, "rev-parse", "--short", "HEAD"],
                              check=True, capture_output=True, text=True).stdout.strip()
-        changed = subprocess.run(["git", "-C", workspace, "diff", "--name-only", "HEAD~1", "HEAD"],
-                                 capture_output=True, text=True).stdout.split()
+        diff = subprocess.run(["git", "-C", workspace, "diff", "--name-only", "HEAD~1", "HEAD"],
+                              capture_output=True, text=True)
+        if diff.returncode == 0:
+            changed = diff.stdout.split()
+        else:
+            # Root commit has no HEAD~1 — list its files directly, otherwise
+            # the first snapshot always reports files_changed=[].
+            changed = subprocess.run(["git", "-C", workspace, "diff-tree",
+                                      "--no-commit-id", "--name-only", "-r", "--root", "HEAD"],
+                                     capture_output=True, text=True).stdout.split()
         return {"snapshot_id": snapshot_id, "commit_ref": ref,
                 "files_changed": changed, "reason": reason}
     except Exception:
@@ -122,13 +134,21 @@ def run(attempt_id: str, workspace: str, backend_url: str,
     state = scan_workspace(workspace)
     snapshot_count = 0
     last_snapshot = time.monotonic()
+    pending: dict[str, dict] = {}  # path -> latest change, awaiting a snapshot
     while True:
         time.sleep(poll_seconds)
         new_state = scan_workspace(workspace)
         changes = diff_snapshots(state, new_state)
         state = new_state
+        # Accumulate across polls: scans advance every second, but snapshots
+        # only fire on the interval — emitting only the current poll's diff
+        # at snapshot time would silently drop every earlier change.
+        for c in changes:
+            pending[c["path"]] = c
         now = time.monotonic()
-        if changes and now - last_snapshot >= snapshot_seconds:
+        if pending and now - last_snapshot >= snapshot_seconds:
+            changes = list(pending.values())
+            pending.clear()
             snapshot_count += 1
             snapshot_id = f"snap_{snapshot_count:04d}"
             payload = git_snapshot(workspace, snapshot_id)

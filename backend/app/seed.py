@@ -1,6 +1,25 @@
 from .models import *
 from .store import store
+from .auth import hash_password
+
+# Demo account for local evaluation — created in-memory at startup.
+# Login: demo@rozark.dev / demo1234 (see README "Demo account").
+DEMO_EMAIL = "demo@rozark.dev"
+DEMO_PASSWORD = "demo1234"
+
+def seed_demo_user():
+    if DEMO_EMAIL in store.users: return
+    rec = UserRecord(
+        id=store.next_user_id(),
+        company_name="Demo Startup",
+        name="Demo Recruiter",
+        email=DEMO_EMAIL,
+        password_hash=hash_password(DEMO_PASSWORD),
+    )
+    store.users[DEMO_EMAIL] = rec
+
 def seed():
+    seed_demo_user()
     if store.challenges: return
     c=ChallengeCreate(
         title="Fix the orders API pagination bug",

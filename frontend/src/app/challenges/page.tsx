@@ -1,3 +1,0 @@
-import Link from "next/link";
-import { fetchChallenges } from "@/lib/api";
-export default async function ChallengesPage(){ const challenges=await fetchChallenges(); return <div className="space-y-4"><h1 className="text-2xl font-bold">Challenges</h1>{challenges.map((c:any)=>(<article key={c.id} className="rounded border border-gray-700 p-4"><h2 className="font-semibold">{c.title}</h2><p className="text-sm text-gray-400">{c.type} · {c.difficulty} · {c.score} pts · {c.recommended_time_minutes} min</p><p className="mt-2 text-sm">{c.problem_description}</p><Link className="mt-2 inline-block text-indigo-300 text-sm" href={`/attempts/${c.id}`}>Open attempt view →</Link></article>))}</div>; }
