@@ -1,7 +1,7 @@
 from __future__ import annotations
 from enum import Enum
 from typing import Any, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 class Difficulty(str, Enum):
     easy="easy"; medium="medium"; hard="hard"
@@ -54,12 +54,17 @@ class ScoringSettings(BaseModel):
 class AgentConfig(BaseModel):
     allowed_agents: list[str]=Field(default_factory=lambda:["claude_code","codex"])
     model: Optional[str]=None
-    token_budget: int=100000
+    token_budget: int=Field(default=100000, ge=0)
     time_limit_minutes: Optional[int]=None
     internet_enabled: bool=False
 class RubricWeights(BaseModel):
-    functional: float=0.4
-    ai_collaboration: float=0.6
+    functional: float=Field(default=0.4, ge=0.0, le=1.0)
+    ai_collaboration: float=Field(default=0.6, ge=0.0, le=1.0)
+    @model_validator(mode="after")
+    def _weights_sum_to_one(self):
+        if abs(self.functional + self.ai_collaboration - 1.0) > 1e-6:
+            raise ValueError("rubric weights must sum to 1.0 (total score is a weighted mean on a 0-100 scale)")
+        return self
 
 class ChallengeCreate(BaseModel):
     title: str
@@ -143,6 +148,25 @@ class TokenBudgetSummary(BaseModel):
     by_phase: dict[str,int]=Field(default_factory=dict)
     budget_exceeded: bool=False
     hard_stop: bool=False
+class UserCreate(BaseModel):
+    company_name: str
+    name: str
+    email: str
+    password: str
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+class User(BaseModel):
+    id: str
+    company_name: str
+    name: str
+    email: str
+class UserRecord(User):
+    password_hash: str
+class AuthResponse(BaseModel):
+    token: str
+    user: User
+
 class Replay(BaseModel):
     attempt_id: str
     session_id: str=""

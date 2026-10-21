@@ -119,3 +119,52 @@ def test_legacy_terminal_type_still_accepted():
     att = _start_attempt()
     r = _post_event(att["id"], {"type": "terminal", "payload": {"command": "pytest -q"}})
     assert r.status_code == 201 and r.json()["type"] == "terminal"
+
+
+def test_negative_token_usage_cannot_reduce_recorded_usage():
+    # Regression: a negative token figure used to drive tokens_used below
+    # zero (used=-5000, remaining>budget) — a budget-cap bypass.
+    att = _start_attempt()
+    aid = att["id"]
+    _post_event(aid, {"type": "token_usage", "actor": "system",
+                      "payload": {"phase": "building", "tokens_total": 900}})
+    r = _post_event(aid, {"type": "token_usage", "actor": "system",
+                          "payload": {"phase": "building", "tokens_total": -950}})
+    assert r.status_code == 201
+    budget = client.get(f"/attempts/{aid}/budget").json()
+    assert budget["used"] == 900 and budget["by_phase"] == {"building": 900}
+
+
+def test_malformed_token_values_do_not_500():
+    att = _start_attempt()
+    r = _post_event(att["id"], {"type": "token_usage", "actor": "system",
+                                "payload": {"tokens_in": "lots", "tokens_out": None}})
+    assert r.status_code == 201
+    budget = client.get(f"/attempts/{att['id']}/budget").json()
+    assert budget["used"] == 0
+
+
+def test_rubric_weights_must_sum_to_one():
+    r = client.post("/challenges", json={
+        "title": "Bad weights", "rubric_weights": {"functional": 1.0, "ai_collaboration": 1.0}})
+    assert r.status_code == 422
+
+
+def test_negative_token_budget_rejected():
+    r = client.post("/challenges", json={
+        "title": "Neg budget", "agent_config": {"token_budget": -5}})
+    assert r.status_code == 422
+
+
+def test_events_after_submit_are_frozen_and_resubmit_rejected():
+    att = _start_attempt()
+    aid = att["id"]
+    r = client.post(f"/attempts/{aid}/submit", json={"scorer_output": "FS_SCORE: 50%"})
+    assert r.status_code == 200
+    r = _post_event(aid, {"type": "prompt", "payload": {"text": "after submit"}})
+    assert r.status_code == 409
+    r = client.post(f"/attempts/{aid}/submit", json={"scorer_output": "FS_SCORE: 99%"})
+    assert r.status_code == 409
+    # the original report is untouched by the rejected re-submit
+    rep = client.get(f"/attempts/{aid}/report").json()
+    assert rep["functional_score"] == 50.0

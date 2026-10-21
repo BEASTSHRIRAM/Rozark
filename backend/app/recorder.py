@@ -18,6 +18,16 @@ _AGENT_ACTIVITY = {EventType.prompt, EventType.tool_call, EventType.agent_respon
 class BudgetHardStop(Exception):
     """Raised when agent activity is submitted after the token cap."""
 
+def _token_count(value) -> int:
+    """Coerce a token figure to a non-negative int.
+
+    Token figures arrive in event payloads (ultimately from the metering
+    proxy); a malformed value must never 500 the recorder, and a negative
+    value must never *reduce* recorded usage — that would bypass the cap.
+    """
+    try: return max(0, int(value))
+    except (TypeError, ValueError): return 0
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -47,8 +57,9 @@ class Recorder:
         p = ev.payload
         total = p.get("tokens_total")
         if total is None:
-            total = int(p.get("tokens_in", 0)) + int(p.get("tokens_out", 0))
-        total = int(total)
+            total = _token_count(p.get("tokens_in", 0)) + _token_count(p.get("tokens_out", 0))
+        else:
+            total = _token_count(total)
         attempt.tokens_used += total
         phase = str(p.get("phase", "building"))
         attempt.tokens_by_phase[phase] = attempt.tokens_by_phase.get(phase, 0) + total
