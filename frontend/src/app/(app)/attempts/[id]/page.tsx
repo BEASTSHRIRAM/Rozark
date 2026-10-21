@@ -50,7 +50,7 @@ const DEMO = {
 };
 
 // Muted phase accents — functional micro-accents inside product UI only.
-const phaseColor: Record<string, string> = { planning: "bg-violet-400/70", building: "bg-cyan-300/60", debugging: "bg-amber-400/70" };
+const phaseColor: Record<string, string> = { planning: "bg-cobalt", building: "bg-vermillion", debugging: "bg-stonewarm" };
 
 function BudgetBar() {
   const b = DEMO.budget;
@@ -85,9 +85,9 @@ export default function AttemptPage({ params }: { params: { id: string } }) {
         <div className="flex items-center gap-4">
           <div className="text-right">
             <p className="font-mono text-lg leading-none">{DEMO.timeLeftMin}:00 <span className="text-xs text-gray-500">left of {DEMO.timeLimitMin}m (demo timer)</span></p>
-            <div className="mt-1 h-1.5 w-40 rounded bg-gray-800"><div className="h-1.5 rounded bg-indigo-500" style={{ width: `${elapsedPct}%` }} /></div>
+            <div className="mt-1 h-1.5 w-40 rounded bg-gray-800"><div className="h-1.5 rounded bg-vermillion" style={{ width: `${elapsedPct}%` }} /></div>
           </div>
-          <button className="rounded bg-emerald-600 px-4 py-2 text-sm font-semibold" title="Scaffold: submit freezes the workspace — see docs/SANDBOX.md">Submit (scaffold)</button>
+          <button className="rounded bg-sage px-4 py-2 text-sm font-semibold" title="Scaffold: submit freezes the workspace — see docs/SANDBOX.md">Submit (scaffold)</button>
         </div>
       </div>
       <p className="rounded border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-gray-300">
@@ -124,7 +124,7 @@ export default function AttemptPage({ params }: { params: { id: string } }) {
               {DEMO.sampleTests.map((t) => (
                 <li key={t.name} className="flex justify-between">
                   <span className="font-mono text-xs">{t.name}</span>
-                  <span className={t.status === "passed" ? "text-emerald-400" : "text-red-400"}>{t.status} · {t.points} pts</span>
+                  <span className={t.status === "passed" ? "text-sagelt" : "text-[#FF8A5C]"}>{t.status} · {t.points} pts</span>
                 </li>
               ))}
             </ul>
@@ -137,7 +137,7 @@ export default function AttemptPage({ params }: { params: { id: string } }) {
         {/* MIDDLE — code / files (VS Code-like scaffold) */}
         <section className="overflow-hidden rounded border border-gray-700">
           <div className="flex border-b border-gray-700 bg-gray-900 text-xs">
-            <span className="border-r border-gray-700 bg-gray-950 px-3 py-2 font-mono text-indigo-300">{DEMO.defaultFile} ●</span>
+            <span className="border-r border-gray-700 bg-gray-950 px-3 py-2 font-mono text-cobaltlt">{DEMO.defaultFile} ●</span>
             <span className="px-3 py-2 font-mono text-gray-500">tests/test_public.py (read-only)</span>
           </div>
           <div className="grid grid-cols-[170px_1fr]">
@@ -172,7 +172,7 @@ export default function AttemptPage({ params }: { params: { id: string } }) {
             <h2 className="font-semibold">AI Agent</h2>
             <div className="flex rounded border border-gray-600 text-xs" role="group" aria-label="Agent mode">
               {(["plan", "agent"] as const).map((m) => (
-                <button key={m} onClick={() => setMode(m)} className={`px-3 py-1 capitalize ${mode === m ? "bg-indigo-600 text-white" : "text-gray-400"}`}>{m}</button>
+                <button key={m} onClick={() => setMode(m)} className={`px-3 py-1 capitalize ${mode === m ? "bg-vermillion text-white" : "text-gray-400"}`}>{m}</button>
               ))}
             </div>
           </div>
@@ -192,7 +192,7 @@ export default function AttemptPage({ params }: { params: { id: string } }) {
         </section>
       </div>
 
-      <Link className="text-sm text-indigo-300" href={`/reports/${params.id}`}>View evidence report →</Link>
+      <Link className="text-sm text-cobaltlt" href={`/reports/${params.id}`}>View evidence report →</Link>
     </div>
   );
 }

@@ -112,14 +112,14 @@ export default function SandboxTerminal({ attemptId, submitted }: { attemptId: s
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="mb-2 flex flex-wrap items-center gap-2">
         {state === "idle" && (
-          <button onClick={start} className="rounded-lg bg-indigo-700 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-indigo-600">
+          <button onClick={start} className="rounded-lg bg-vermilliondeep px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-vermillion">
             ▶ Start sandbox session
           </button>
         )}
         {state === "starting" && <span className="text-xs text-gray-400">Starting sandbox…</span>}
         {state === "live" && (
           <>
-            <span className="rounded bg-emerald-500/10 px-2 py-1 font-mono text-[11px] text-emerald-300">
+            <span className="rounded bg-sage/10 px-2 py-1 font-mono text-[11px] text-sagelt">
               ● live · backend: {session?.backend || "local"}{session?.expires_at ? ` · expires ${new Date(session.expires_at).toLocaleTimeString()}` : ""}
             </span>
             <button onClick={stop} className="rounded-lg border border-white/15 px-3 py-1.5 text-xs text-gray-200 transition hover:bg-white/5">Stop session</button>
@@ -136,7 +136,7 @@ export default function SandboxTerminal({ attemptId, submitted }: { attemptId: s
             {submitted ? "session frozen by submit — workspace sealed into the report" : "session stopped — PTY closed, final git snapshot recorded"}
           </span>
         )}
-        {session?.backend_note && <span className="text-[11px] text-amber-300/90">{session.backend_note}</span>}
+        {session?.backend_note && <span className="text-[11px] text-[#E0A458]/90">{session.backend_note}</span>}
         {error && <span className="text-[11px] text-red-300">{error}</span>}
       </div>
       <div className="min-h-[220px] flex-1 overflow-hidden rounded-lg border border-white/10 bg-[#0b0f1c] p-1.5">

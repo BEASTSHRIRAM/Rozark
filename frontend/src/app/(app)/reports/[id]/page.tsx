@@ -8,12 +8,12 @@ export default function ReportPage({ params }: { params: { id: string } }) {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Candidate Report — {params.id}</h1>
-        <p className="text-sm text-amber-300">{r.candidate} — layout + content modelled on HirePrise-style evidence cards. Live reports come from GET /attempts/{"{id}"}/report and /replay; every score below links to evidence event ids.</p>
+        <p className="text-sm text-[#E0A458]">{r.candidate} — layout + content modelled on HirePrise-style evidence cards. Live reports come from GET /attempts/{"{id}"}/report and /replay; every score below links to evidence event ids.</p>
       </div>
 
       {/* Fit + scores */}
       <div className="grid gap-4 md:grid-cols-4">
-        <div className="rounded border-2 border-indigo-500/60 p-4 text-center"><p className="text-sm text-gray-400">Fit</p><p className="text-4xl font-bold text-indigo-300">{r.fit}%</p><p className="mt-1 text-xs text-gray-500">weighted 40% functional + 60% AI collaboration</p></div>
+        <div className="rounded border-2 border-vermillion/60 p-4 text-center"><p className="text-sm text-gray-400">Fit</p><p className="text-4xl font-bold text-cobaltlt">{r.fit}%</p><p className="mt-1 text-xs text-gray-500">weighted 40% functional + 60% AI collaboration</p></div>
         <div className="rounded border border-gray-700 p-4"><p className="text-sm text-gray-400">Functional</p><p className="text-3xl font-bold">{r.functional}</p><p className="text-xs text-gray-500">sample 50/50 · hidden 37.5/50</p></div>
         <div className="rounded border border-gray-700 p-4"><p className="text-sm text-gray-400">AI Collaboration</p><p className="text-3xl font-bold">{r.ai}</p><p className="text-xs text-gray-500">from recorded session events</p></div>
         <div className="rounded border border-gray-700 p-4"><p className="text-sm text-gray-400">Session</p><p className="text-sm">Active <strong>{r.metrics.activeTime}</strong></p><p className="text-sm">First edit <strong>{r.metrics.timeToFirstEdit}</strong></p><p className="text-sm">Sample green <strong>{r.metrics.sampleGreenAt}</strong></p><p className="text-xs text-gray-500">{r.metrics.prompts} prompts · {r.metrics.snapshots} git snapshots</p></div>
@@ -21,16 +21,16 @@ export default function ReportPage({ params }: { params: { id: string } }) {
 
       {/* Hire signals / concerns */}
       <div className="grid gap-4 md:grid-cols-2">
-        <section className="rounded border border-emerald-800/70 p-4">
-          <h2 className="font-semibold text-emerald-300">Hire signals</h2>
+        <section className="rounded border border-sage/40/70 p-4">
+          <h2 className="font-semibold text-sagelt">Hire signals</h2>
           <ul className="mt-2 space-y-3">
-            {r.signals.map((s) => (<li key={s.text} className="text-sm"><p>{s.text}</p><a href={s.ref} className="font-mono text-xs text-indigo-300 underline">↳ {s.evidence}</a></li>))}
+            {r.signals.map((s) => (<li key={s.text} className="text-sm"><p>{s.text}</p><a href={s.ref} className="font-mono text-xs text-cobaltlt underline">↳ {s.evidence}</a></li>))}
           </ul>
         </section>
         <section className="rounded border border-red-800/70 p-4">
           <h2 className="font-semibold text-red-300">Concerns</h2>
           <ul className="mt-2 space-y-3">
-            {r.concerns.map((s) => (<li key={s.text} className="text-sm"><p>{s.text}</p><a href={s.ref} className="font-mono text-xs text-indigo-300 underline">↳ {s.evidence}</a></li>))}
+            {r.concerns.map((s) => (<li key={s.text} className="text-sm"><p>{s.text}</p><a href={s.ref} className="font-mono text-xs text-cobaltlt underline">↳ {s.evidence}</a></li>))}
           </ul>
         </section>
       </div>
@@ -78,7 +78,7 @@ export default function ReportPage({ params }: { params: { id: string } }) {
       </section>
 
       {/* Reviewer summary */}
-      <section className="rounded border border-indigo-800/60 bg-indigo-950/30 p-4">
+      <section className="rounded border border-white/10 bg-white/[0.03] p-4">
         <h2 className="font-semibold">Reviewer summary</h2>
         <p className="mt-1 text-sm leading-6 text-gray-200">{r.summary}</p>
       </section>
