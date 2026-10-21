@@ -1,0 +1,51 @@
+# Rozark challenge image — one image per challenge, one container per session.
+# See docs/SANDBOX.md for the run contract. Skeleton for the 1-day proof.
+#
+# Rules baked into this file:
+#   - runs as a NON-ROOT user
+#   - NO secrets / API keys in the image, ever — the agent's short-lived,
+#     budget-capped credential is injected at runtime via the budget proxy
+#   - dependencies are preinstalled at build time so a session starts fast
+#     and needs no general internet (egress allowlist: proxy + mirrors only)
+FROM python:3.12-slim
+
+# Base tooling: git (snapshots), curl, build basics for the watcher sidecar.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git curl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+# --- Coding agent -----------------------------------------------------------
+# TODO: VERIFY AGAINST CURRENT CLAUDE CODE DOCS BEFORE BUILDING.
+# The exact install method, headless/non-interactive configuration, settings
+# file format, and how Claude Code reads credentials from the environment
+# change over time — check the official Claude Code documentation and use
+# what it says. Do NOT invent a config format here, and NEVER bake a real
+# API key into this image or any layer of it.
+# Placeholder only (intentionally not a real install command):
+#   RUN <install claude code per current official docs>
+# At runtime the agent must be pointed at the Rozark budget proxy with the
+# per-session, short-lived credential issued by the backend — the candidate
+# never sees a real key, and the spend cap is enforced at the proxy.
+# TODO: add the Codex install/config the same way (second agent, same rules).
+
+# Non-root candidate user.
+RUN useradd --create-home --shell /bin/bash candidate
+
+WORKDIR /workspace
+
+# Challenge repo + preinstalled dependencies. In the real build the repo is
+# copied from the challenge's project setup (upload zip / clone / sample):
+#   COPY challenge-repo/ /workspace/
+#   RUN pip install -r /workspace/requirements.txt   # build-time only
+COPY --chown=candidate:candidate recorder_sidecar.py /opt/rozark/recorder_sidecar.py
+
+# Recorder sidecar runs as a skeleton in the proof: it watches /workspace and
+# posts file_edit / git_snapshot events to the backend (see the script).
+USER candidate
+ENV ROZARK_WORKSPACE=/workspace \
+    ROZARK_BACKEND_URL=http://host.docker.internal:8000
+
+# Demo entrypoint: shell for the PTY bridge. The sidecar is started by the
+# session launcher, e.g.:
+#   python3 /opt/rozark/recorder_sidecar.py --attempt <attempt_id> &
+CMD ["/bin/bash"]

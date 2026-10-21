@@ -1,0 +1,4 @@
+Hidden tests live here in the real challenge (file: test_hidden.py) and are NOT
+shown to candidates (hidden_files in challenge.json). They check page 4 == ids
+16-20 and page 5 == [] for size=5. This .note file is shipped instead so the
+public repo does not leak the hidden test file itself.

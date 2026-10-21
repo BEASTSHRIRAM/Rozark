@@ -1,0 +1,29 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: rozark
+      POSTGRES_PASSWORD: rozark
+      POSTGRES_DB: rozark
+    ports:
+      - "5432:5432"
+    volumes:
+      - rozark_db:/var/lib/postgresql/data
+  backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql+psycopg://rozark:rozark@db:5432/rozark
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+  frontend:
+    build: ./frontend
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+volumes:
+  rozark_db:

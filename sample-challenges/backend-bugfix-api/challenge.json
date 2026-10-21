@@ -1,0 +1,59 @@
+{
+  "title": "Fix the orders API pagination bug",
+  "type": "backend",
+  "difficulty": "medium",
+  "score": 75,
+  "recommended_time_minutes": 30,
+  "tags": [
+    "python",
+    "fastapi",
+    "debugging"
+  ],
+  "problem_description": "GET /items returns overlapping pages. Fix the pagination bug.",
+  "environment": {
+    "stack": "python-fastapi",
+    "runtime": "ubuntu-24.04"
+  },
+  "project_setup": {
+    "source": "sample",
+    "github_url": null,
+    "zip_filename": null
+  },
+  "ide_setup": {
+    "install_command": "pip install -r requirements.txt",
+    "run_command": "python -m app.main",
+    "test_command": "pytest -q",
+    "default_open_files": [
+      "README.md",
+      "app/main.py"
+    ],
+    "read_only_files": [
+      "README.md"
+    ],
+    "hidden_files": [
+      "tests/test_hidden.py"
+    ]
+  },
+  "scoring": {
+    "mode": "automated",
+    "format": "junit",
+    "scoring_command": "pytest --junitxml=results.xml",
+    "scoring_output_files": [
+      "results.xml"
+    ]
+  },
+  "agent_config": {
+    "allowed_agents": [
+      "claude_code",
+      "codex"
+    ],
+    "model": null,
+    "token_budget": 100000,
+    "time_limit_minutes": 30,
+    "internet_enabled": false
+  },
+  "rubric_weights": {
+    "functional": 0.4,
+    "ai_collaboration": 0.6
+  }
+}
