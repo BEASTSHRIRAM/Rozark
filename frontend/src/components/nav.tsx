@@ -4,11 +4,11 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { fetchMe, getToken, logout, type AuthUser } from "@/lib/auth";
 
-export function Logo({ href = "/" }: { href?: string }) {
+export function Logo({ href = "/", dark = false }: { href?: string; dark?: boolean }) {
   return (
     <Link href={href} className="flex items-center gap-2.5">
-      <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 text-sm font-black text-white shadow-lg shadow-indigo-950/50">R</span>
-      <span className="text-lg font-bold tracking-tight text-white">Rozark</span>
+      <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-vermillion font-display text-base font-black text-white">R</span>
+      <span className={`font-display text-xl font-bold tracking-tight ${dark ? "text-paper" : "text-ink"}`}>Rozark</span>
     </Link>
   );
 }
@@ -28,26 +28,26 @@ export function SiteNav() {
   const { user, ready } = useAuthUser();
   const router = useRouter();
   return (
-    <header className="sticky top-0 z-40 border-b border-white/5 bg-[#070b16]/85 backdrop-blur">
+    <header className="sticky top-0 z-40 border-b border-sand bg-paper/85 backdrop-blur">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-5">
         <Logo />
-        <nav className="hidden items-center gap-7 text-sm text-gray-300 md:flex">
-          <a href="#product" className="transition hover:text-white">Product</a>
-          <a href="#how" className="transition hover:text-white">How it works</a>
-          <a href="#report" className="transition hover:text-white">Report</a>
-          <a href="#pricing" className="transition hover:text-white">Pricing</a>
-          <a href="https://github.com/BEASTSHRIRAM/Rozark" target="_blank" rel="noreferrer" className="transition hover:text-white">GitHub</a>
+        <nav className="hidden items-center gap-7 text-sm text-ink/70 md:flex">
+          <a href="#product" className="transition hover:text-vermillion">Product</a>
+          <a href="#how" className="transition hover:text-vermillion">How it works</a>
+          <a href="#report" className="transition hover:text-vermillion">Report</a>
+          <a href="#pricing" className="transition hover:text-vermillion">Pricing</a>
+          <a href="https://github.com/BEASTSHRIRAM/Rozark" target="_blank" rel="noreferrer" className="transition hover:text-vermillion">GitHub</a>
         </nav>
         <div className="flex items-center gap-3">
           {ready && user ? (
             <>
-              <Link href="/dashboard" className="hidden text-sm text-gray-300 transition hover:text-white sm:block">{user.company_name}</Link>
-              <Link href="/dashboard" className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500">Open dashboard</Link>
+              <Link href="/dashboard" className="hidden text-sm text-ink/70 transition hover:text-ink sm:block">{user.company_name}</Link>
+              <Link href="/dashboard" className="cta-lift rounded-full bg-vermillion px-5 py-2 text-sm font-semibold text-white hover:bg-vermilliondeep">Open dashboard</Link>
             </>
           ) : (
             <>
-              <Link href="/login" className="text-sm font-medium text-gray-200 transition hover:text-white">Log in</Link>
-              <button onClick={() => router.push("/signup")} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500">Get started</button>
+              <Link href="/login" className="text-sm font-medium text-ink transition hover:text-vermillion">Log in</Link>
+              <button onClick={() => router.push("/signup")} className="cta-lift rounded-full bg-vermillion px-5 py-2 text-sm font-semibold text-white hover:bg-vermilliondeep">Get started</button>
             </>
           )}
         </div>
@@ -66,24 +66,24 @@ export function AppNav() {
     { href: "/challenges/new", label: "Create challenge" },
   ];
   return (
-    <header className="sticky top-0 z-40 border-b border-white/5 bg-[#070b16]/85 backdrop-blur">
+    <header className="sticky top-0 z-40 border-b border-white/10 bg-ink/95 backdrop-blur">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-5">
         <div className="flex items-center gap-8">
-          <Logo href="/dashboard" />
-          <nav className="hidden items-center gap-6 text-sm text-gray-300 md:flex">
-            {links.map((l) => (<Link key={l.href} href={l.href} className="transition hover:text-white">{l.label}</Link>))}
+          <Logo href="/dashboard" dark />
+          <nav className="hidden items-center gap-6 text-sm text-paper/70 md:flex">
+            {links.map((l) => (<Link key={l.href} href={l.href} className="transition hover:text-paper">{l.label}</Link>))}
           </nav>
         </div>
         <div className="flex items-center gap-3">
           {user && (
-            <span className="hidden items-center gap-2 rounded-full border border-white/10 bg-white/5 py-1 pl-1 pr-3 text-xs text-gray-200 sm:flex">
-              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-600 text-[11px] font-bold text-white">{user.name.charAt(0).toUpperCase()}</span>
+            <span className="hidden items-center gap-2 rounded-full border border-white/15 bg-white/5 py-1 pl-1 pr-3 text-xs text-paper/85 sm:flex">
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-vermillion text-[11px] font-bold text-white">{user.name.charAt(0).toUpperCase()}</span>
               {user.name} · {user.company_name}
             </span>
           )}
           <button
             onClick={() => { logout(); router.push("/login"); }}
-            className="rounded-lg border border-white/10 px-3 py-1.5 text-sm text-gray-200 transition hover:bg-white/5"
+            className="rounded-full border border-white/15 px-4 py-1.5 text-sm text-paper/85 transition hover:bg-white/10"
           >
             Log out
           </button>
@@ -104,7 +104,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   }, [router]);
   if (!ok) {
     return (
-      <div className="flex min-h-[50vh] items-center justify-center text-sm text-gray-400">
+      <div className="flex min-h-[50vh] items-center justify-center text-sm text-paper/60">
         Checking your session…
       </div>
     );

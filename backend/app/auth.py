@@ -7,9 +7,8 @@ Design (honest, MVP-grade):
 - Sessions are signed JWTs (PyJWT, HS256). The signing secret comes from
   the ROZARK_JWT_SECRET environment variable. The default below is a DEV
   DEFAULT ONLY — set a real secret in any deployed environment.
-- Users live in the in-memory store (same pattern as challenges/attempts),
-  so accounts reset when the backend restarts. Persistence is future work
-  and is labelled as such in the README.
+- Users live in the durable store (SQLite, app/store.py), so accounts
+  survive backend restarts like everything else.
 """
 from __future__ import annotations
 

@@ -2,7 +2,7 @@ from .models import *
 from .store import store
 from .auth import hash_password
 
-# Demo account for local evaluation — created in-memory at startup.
+# Demo account for local evaluation — seeded into the durable store.
 # Login: demo@rozark.dev / demo1234 (see README "Demo account").
 DEMO_EMAIL = "demo@rozark.dev"
 DEMO_PASSWORD = "demo1234"
