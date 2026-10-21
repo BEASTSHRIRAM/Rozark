@@ -7,6 +7,7 @@ moment cumulative usage reaches the cap (enforcement itself lives at the
 budget proxy — see docs/SANDBOX.md; these flags are the backend mirror).
 """
 from __future__ import annotations
+import threading
 from datetime import datetime, timezone
 from .models import Actor, Attempt, EventType, SessionEvent, SessionEventCreate, TokenBudgetSummary
 from .store import store
@@ -32,26 +33,35 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 class Recorder:
+    def __init__(self):
+        # Appends arrive from request threads, the sandbox watcher thread,
+        # and PTY bridge threads — serialise them so seq stays a strict
+        # 1..N ordering with no gaps or duplicates.
+        self._lock = threading.RLock()
+
     def append(self, attempt: Attempt, body: SessionEventCreate) -> SessionEvent:
-        if attempt.budget_hard_stop and body.type in _AGENT_ACTIVITY:
-            raise BudgetHardStop(
-                f"Token budget hard stop is active for attempt {attempt.id} "
-                f"({attempt.tokens_used}/{attempt.token_budget} tokens used)."
+        with self._lock:
+            if attempt.budget_hard_stop and body.type in _AGENT_ACTIVITY:
+                raise BudgetHardStop(
+                    f"Token budget hard stop is active for attempt {attempt.id} "
+                    f"({attempt.tokens_used}/{attempt.token_budget} tokens used)."
+                )
+            seq = len(attempt.events) + 1
+            ev = SessionEvent(
+                id=store.next_event_id(),
+                attempt_id=attempt.id,
+                session_id=attempt.session_id or attempt.id,
+                sequence=seq,
+                seq=seq,
+                ts=_now_iso(),
+                **body.model_dump(),
             )
-        seq = len(attempt.events) + 1
-        ev = SessionEvent(
-            id=store.next_event_id(),
-            attempt_id=attempt.id,
-            session_id=attempt.session_id or attempt.id,
-            sequence=seq,
-            seq=seq,
-            ts=_now_iso(),
-            **body.model_dump(),
-        )
-        attempt.events.append(ev)
-        if ev.type == EventType.token_usage:
-            self._apply_token_usage(attempt, ev)
-        return ev
+            attempt.events.append(ev)
+            if ev.type == EventType.token_usage:
+                self._apply_token_usage(attempt, ev)
+            # Write-through: events + token fields must survive a restart.
+            store.save_attempt(attempt)
+            return ev
 
     def _apply_token_usage(self, attempt: Attempt, ev: SessionEvent) -> None:
         p = ev.payload

@@ -1,7 +1,10 @@
 "use client";
 import { useState } from "react";
+import Link from "next/link";
 
 const STEPS = ["Environment", "Project Setup", "IDE Setup", "Scoring", "Details", "AI Agent Config"] as const;
+const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const csv = (s: string) => s.split(",").map((x) => x.trim()).filter(Boolean);
 
 export default function CreateChallengePage() {
   const [step, setStep] = useState(0);
@@ -13,6 +16,49 @@ export default function CreateChallengePage() {
     token_budget: 100000, internet_enabled: false,
   });
   const set = (k: string, v: string | number | boolean) => setForm((f) => ({ ...f, [k]: v }));
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [saveMsg, setSaveMsg] = useState("");
+  const [savedId, setSavedId] = useState("");
+
+  async function save() {
+    // Real save: POST the wizard payload to the backend /challenges
+    // endpoint (shape: backend ChallengeCreate, docs/CHALLENGE_SCHEMA.md).
+    setSaveState("saving"); setSaveMsg("");
+    const payload = {
+      title: form.title.trim(),
+      difficulty: form.difficulty,
+      tags: csv(form.stack),
+      problem_description: form.problem_description,
+      project_setup: { source: form.source, github_url: form.github_url || null },
+      ide_setup: {
+        install_command: form.install_command, run_command: form.run_command,
+        test_command: form.test_command, default_open_files: csv(form.default_open_files),
+      },
+      scoring: { mode: form.scoring_mode, format: form.scoring_format },
+      agent_config: {
+        allowed_agents: csv(form.allowed_agents), token_budget: Number(form.token_budget) || 0,
+        internet_enabled: form.internet_enabled,
+      },
+    };
+    try {
+      const res = await fetch(`${API}/challenges`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        let detail = `HTTP ${res.status}`;
+        try { detail = (await res.json())?.detail || detail; } catch { /* keep status */ }
+        throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+      }
+      const created = await res.json();
+      setSavedId(created.id);
+      setSaveState("saved");
+      setSaveMsg(`Challenge saved as ${created.id} — it now appears in the challenge library, persisted in the backend store.`);
+    } catch (e) {
+      setSaveState("error");
+      setSaveMsg(e instanceof Error ? e.message : "Save failed — is the backend running on :8000?");
+    }
+  }
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold">Create Challenge — {STEPS[step]}</h1>
@@ -25,9 +71,20 @@ export default function CreateChallengePage() {
       {step === 5 && (<div className="space-y-3"><label className="block text-sm">Allowed agents (comma separated)<input className="mt-1 w-full rounded bg-gray-900 p-2" value={form.allowed_agents} onChange={(e) => set("allowed_agents", e.target.value)} /></label><label className="block text-sm">Token budget<input type="number" className="mt-1 w-full rounded bg-gray-900 p-2" value={form.token_budget} onChange={(e) => set("token_budget", Number(e.target.value))} /></label><label className="flex gap-2 text-sm"><input type="checkbox" checked={form.internet_enabled} onChange={(e) => set("internet_enabled", e.target.checked)} /> Internet enabled</label></div>)}
       <div className="flex gap-3">
         <button disabled={step === 0} className="rounded border border-gray-600 px-4 py-2 disabled:opacity-40" onClick={() => setStep(step - 1)}>Back</button>
-        {step < STEPS.length - 1 ? (<button className="rounded bg-indigo-600 px-4 py-2" onClick={() => setStep(step + 1)}>Next</button>) : (<button className="rounded bg-green-600 px-4 py-2" onClick={() => alert("MVP stub: POST this payload to /challenges — see docs/CHALLENGE_SCHEMA.md\n" + JSON.stringify(form, null, 2))}>Validate &amp; Save (stub)</button>)}
+        {step < STEPS.length - 1 ? (<button className="rounded-full bg-indigo-600 px-5 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500" onClick={() => setStep(step + 1)}>Next</button>) : (<button disabled={saveState === "saving" || !form.title.trim()} className="rounded-full bg-indigo-600 px-5 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:opacity-50" onClick={save}>{saveState === "saving" ? "Saving…" : "Validate & Save"}</button>)}
       </div>
-      <p className="text-xs text-gray-500">Try question / live validation is a stub in the MVP scaffold.</p>
+      {saveState === "saved" && (
+        <p className="rounded-lg border border-white/10 bg-white/[0.03] px-3.5 py-3 text-sm text-gray-200">
+          ✓ {saveMsg} <Link href="/challenges" className="font-medium text-indigo-300 hover:underline">View in challenge library →</Link>
+          <span className="ml-2 font-mono text-xs text-gray-500">{savedId}</span>
+        </p>
+      )}
+      {saveState === "error" && (
+        <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3.5 py-3 text-sm text-red-200">
+          Save failed: {saveMsg}
+        </p>
+      )}
+      <p className="text-xs text-gray-500">Save posts to the backend (POST /challenges) and persists. Try question / live in-browser validation is still a scaffold.</p>
     </div>
   );
 }

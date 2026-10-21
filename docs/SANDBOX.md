@@ -6,6 +6,46 @@
 > what one day can actually prove. Everything here writes into the event log
 > defined in `docs/EVENT_LOG_SCHEMA.md` — that schema came first, on purpose.
 
+## Status (updated 2026-10-22, increment 3)
+
+**LIVE and proven on the dev machine (no Docker there, so the
+local-process backend is the proven path):**
+
+- **Durable store** — challenges / attempts / events / users persist in
+  SQLite (`backend/app/store.py`, `ROZARK_DB_PATH` override, default
+  `backend/rozark.db`). Proven: server restart reads data back.
+- **Session manager** (`backend/app/sandbox.py`) —
+  `POST /attempts/{id}/sandbox/start` materialises an isolated workspace
+  per attempt (copy of the challenge starter, git-initialised, hidden
+  test source never copied), starts the recorder watcher in-process
+  (the sidecar's own scan/diff/snapshot functions), returns session info
+  with `expires_at` from the challenge time limit.
+- **WebSocket PTY** — `/ws/sandbox/{attempt_id}` is a real PTY (bash in
+  the workspace), xterm.js in the browser, resize supported, and BOTH
+  directions are tapped into the event log (`terminal_cmd` /
+  `terminal_output`). Proven with a scripted WS client: `ls`/`echo`
+  output, a `file_edit` event, interval + submit `git_snapshot`s.
+- **Freeze on submit** — submit kills PTYs, stops the watcher, takes a
+  final snapshot, then scores; WS connections after submit are rejected
+  (error frame + close 4409) and event POSTs return 409.
+- **Docker backend** — `DockerSandbox` implements the same interface
+  against `sandbox/Dockerfile.challenge` (volume-mounted workspace,
+  `docker exec` shells, resource caps). Code-complete but **not run on
+  the dev VM (no docker CLI)**; if docker is requested but unavailable,
+  start falls back to local and says so in `backend_note`.
+
+**Still pending (next increments):**
+
+- **Real agent inside the sandbox** (Claude Code first, Codex second) +
+  the **budget proxy** (short-lived capped key, hard stop at the proxy,
+  `token_usage` events from real model calls). The recorder-side budget
+  accounting exists; no real model calls flow yet.
+- Monaco editor wired to the live workspace files (attempt page panes
+  other than the terminal are still labelled demo scaffold).
+- Session expiry auto-submit on timeout (sessions expire + shells close;
+  auto-submit on expiry is not wired).
+- Docker path executed + egress allowlist enforced (needs a Docker host).
+
 ## What the sandbox must do
 
 1. Give each candidate an **isolated environment** with the challenge repo

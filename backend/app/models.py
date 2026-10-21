@@ -167,6 +167,24 @@ class AuthResponse(BaseModel):
     token: str
     user: User
 
+class SandboxSessionInfo(BaseModel):
+    """Runtime info for one attempt's sandbox session (app/sandbox.py).
+
+    Sessions are runtime state: after a backend restart the workspace
+    stays on disk but status is "not_started" until start is called again.
+    """
+    attempt_id: str
+    session_id: str=""
+    workspace_id: str=""
+    workspace_path: str=""
+    backend: str=""               # "local" | "docker" | "" (not started)
+    backend_note: str=""
+    status: str="not_started"     # not_started | active | stopped | frozen | expired
+    ws_url: str=""
+    started_at: str=""
+    expires_at: str=""
+    time_limit_minutes: int=0
+
 class Replay(BaseModel):
     attempt_id: str
     session_id: str=""

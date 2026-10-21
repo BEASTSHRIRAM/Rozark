@@ -45,4 +45,7 @@ export const demoReport = {
   ],
 };
 
-export const phaseColor: Record<string, string> = { planning: "bg-violet-500", building: "bg-cyan-400", debugging: "bg-amber-500" };
+// Phase accents from the Rozark palette — functional micro-accents inside
+// product UI and report data-viz only: cobalt = planning, vermillion =
+// building, stonewarm = debugging.
+export const phaseColor: Record<string, string> = { planning: "bg-cobalt", building: "bg-vermillion", debugging: "bg-stonewarm" };

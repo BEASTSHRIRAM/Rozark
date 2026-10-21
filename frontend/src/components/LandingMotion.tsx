@@ -29,17 +29,22 @@ export default function LandingMotion() {
       gsap.registerPlugin(ScrollTrigger);
 
       ctx = gsap.context(() => {
-        // Headline words stagger up
-        gsap.from(".gs-hero-word", {
-          y: 44, autoAlpha: 0, duration: 0.9, ease: "power3.out", stagger: 0.07, delay: 0.1,
-        });
-        gsap.from(".gs-hero-sub", { y: 24, autoAlpha: 0, duration: 0.8, ease: "power3.out", delay: 0.55 });
-        gsap.from(".gs-hero-ctas", { y: 20, autoAlpha: 0, duration: 0.8, ease: "power3.out", delay: 0.7 });
+        // Hero eyebrow rule draws in from the left.
+        gsap.from(".gs-rule", { scaleX: 0, transformOrigin: "left center", duration: 0.8, ease: "power3.out" });
 
-        // Hero IDE mock: window rises, code types in line by line, agent
-        // cards pop, sample tests tick in, token chip pulses.
-        const tl = gsap.timeline({ delay: 0.35, defaults: { ease: "power3.out" } });
-        tl.from(".gs-hero-visual", { y: 70, scale: 0.96, autoAlpha: 0, duration: 1.0 })
+        // Hero text: TRANSFORM ONLY, from a fully visible state. The H1
+        // must be readable on first paint — no autoAlpha/opacity from-
+        // states on hero copy, ever (that was the "invisible hero" bug).
+        gsap.from(".gs-hero-word", {
+          y: 30, duration: 0.8, ease: "power3.out", stagger: 0.055, delay: 0.05,
+        });
+        gsap.from(".gs-hero-sub", { y: 16, duration: 0.7, ease: "power3.out", delay: 0.3 });
+        gsap.from(".gs-hero-ctas", { y: 14, duration: 0.7, ease: "power3.out", delay: 0.4 });
+
+        // Hero IDE mock: window rises (visible throughout), code types in
+        // line by line, agent cards pop, sample tests tick in.
+        const tl = gsap.timeline({ delay: 0.25, defaults: { ease: "power3.out" } });
+        tl.from(".gs-hero-visual", { y: 40, scale: 0.985, duration: 0.9 })
           .from(".gs-code-line", { autoAlpha: 0, x: -14, duration: 0.35, stagger: 0.14 }, "-=0.45")
           .from(".gs-agent-card", { autoAlpha: 0, y: 16, duration: 0.5, stagger: 0.28 }, "-=0.2")
           .from(".gs-test-row", { autoAlpha: 0, x: -10, duration: 0.4, stagger: 0.16 }, "-=0.15")
@@ -78,37 +83,11 @@ export default function LandingMotion() {
           });
         });
 
-        // Magnetic CTAs (fine pointers only)
-        if (window.matchMedia("(pointer: fine)").matches) {
-          document.querySelectorAll<HTMLElement>("[data-magnetic]").forEach((el) => {
-            const move = (e: MouseEvent) => {
-              const r = el.getBoundingClientRect();
-              gsap.to(el, {
-                x: (e.clientX - r.left - r.width / 2) * 0.18,
-                y: (e.clientY - r.top - r.height / 2) * 0.28,
-                duration: 0.4, ease: "power2.out",
-              });
-            };
-            const leave = () => gsap.to(el, { x: 0, y: 0, duration: 0.5, ease: "elastic.out(1, 0.45)" });
-            el.addEventListener("mousemove", move);
-            el.addEventListener("mouseleave", leave);
-          });
-        }
-
-        // Card hover tilt (subtle, fine pointers only)
-        if (window.matchMedia("(pointer: fine)").matches) {
-          document.querySelectorAll<HTMLElement>("[data-tilt]").forEach((el) => {
-            const move = (e: MouseEvent) => {
-              const r = el.getBoundingClientRect();
-              const rx = ((e.clientY - r.top) / r.height - 0.5) * -4;
-              const ry = ((e.clientX - r.left) / r.width - 0.5) * 4;
-              gsap.to(el, { rotateX: rx, rotateY: ry, transformPerspective: 900, duration: 0.4, ease: "power2.out" });
-            };
-            const leave = () => gsap.to(el, { rotateX: 0, rotateY: 0, duration: 0.5, ease: "power2.out" });
-            el.addEventListener("mousemove", move);
-            el.addEventListener("mouseleave", leave);
-          });
-        }
+        // Motion character ("ink on paper" system): a confident hero
+        // entrance, the IDE mock playing its session, then quiet
+        // ScrollTrigger reveals, bar grows and count-ups below the fold.
+        // CTA hover micro-interactions are CSS (.cta-lift / .link-sweep).
+        // No aurora, no tilt gimmicks, nothing that strands content.
       });
     })();
 

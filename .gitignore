@@ -5,6 +5,7 @@ venv/
 .env
 *.db
 *.sqlite3
+backend/workspaces/
 node_modules/
 .next/
 out/

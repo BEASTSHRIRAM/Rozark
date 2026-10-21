@@ -87,7 +87,7 @@ docker-compose.yml  PostgreSQL + backend + frontend
 
 ## How to run
 
-### Backend (no Docker needed — SQLite / in-memory fallback)
+### Backend (no Docker needed — durable SQLite store)
 
 ```bash
 cd backend
@@ -111,7 +111,7 @@ The landing page is `/`, the app lives behind login at `/dashboard`.
 
 ### Demo account
 
-The backend seeds a demo account in-memory at startup:
+The backend seeds a demo account at startup (into the durable store):
 
 - **Email:** `demo@rozark.dev`
 - **Password:** `demo1234`
@@ -119,8 +119,9 @@ The backend seeds a demo account in-memory at startup:
 Or create your own account on the `/signup` page (company name, your name,
 email, password). Auth is real: passwords are pbkdf2-hashed, sessions are
 signed JWTs (`ROZARK_JWT_SECRET` env var; a marked dev default is used if
-unset). Users are stored in-memory in this increment, so accounts reset
-when the backend restarts.
+unset). All data — users, challenges, attempts, event logs — persists in
+SQLite (`backend/rozark.db` by default; override with `ROZARK_DB_PATH`)
+and survives backend restarts.
 
 ### Deploying the frontend (Vercel)
 
@@ -142,19 +143,28 @@ docker compose up --build
 
 ## Status
 
-MVP — honestly labelled: a HirePrise-grade marketing landing page (`/`,
-GSAP-animated — see the landing for reduced-motion behaviour), real
-signup/login auth (JWT + pbkdf2, users in-memory), and an app shell
-(`/dashboard`, challenges, wizard, attempt, report) are in. The
-challenge/attempt/report APIs, the scoring engine, and the event recorder
-(ordered event log with token-budget tracking, hard-stop flag, and a
-replay endpoint — `docs/EVENT_LOG_SCHEMA.md`) are functional with
-in-memory storage (DATABASE_URL is wired for the Postgres deployment
-path). The sandbox itself is designed in `docs/SANDBOX.md` with a
-challenge-image + recorder-sidecar skeleton in `sandbox/`; the browser
-workspace and report pages show that target layout with clearly-labelled
-demo data, but a live sandboxed runner (websocket PTY, Monaco, in-container
-agent) is not wired up yet.
+MVP — honestly labelled. In and working:
+
+- **Landing + auth**: a HirePrise-grade marketing landing page (`/`,
+  GSAP-animated quietly — reveals + count-ups, reduced-motion respected;
+  palette discipline: near-black/white/grey + one indigo accent, no
+  gradients), real signup/login auth (JWT + pbkdf2), and an app shell
+  (`/dashboard`, challenges, wizard, attempt, report). The
+  create-challenge wizard's Save really posts to `POST /challenges`.
+- **Durable backend**: challenge/attempt/report APIs, the scoring engine,
+  and the event recorder (ordered event log with token-budget tracking,
+  hard-stop flag, and a replay endpoint — `docs/EVENT_LOG_SCHEMA.md`) —
+  all persisted in SQLite (survives restarts; `ROZARK_DB_PATH` override).
+- **Live sandbox** (`docs/SANDBOX.md`): start a session from the attempt
+  page and you get a real terminal (xterm.js + websocket PTY) into an
+  isolated per-attempt workspace — commands, output, file edits and git
+  snapshots are all recorded into the event log, and submit freezes the
+  session. The proven path is the local-process backend; the Docker
+  backend implements the same interface against
+  `sandbox/Dockerfile.challenge` but has not been run on a Docker host
+  yet. Still pending: the in-sandbox coding agent + budget proxy, and the
+  Monaco editor (attempt-page panes other than the terminal remain
+  labelled demo scaffold).
 
 ## License
 

@@ -2,44 +2,23 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Rozark design system — "ink on paper".
+   Warm paper background, ink text, warm hairlines. Vermillion #E8490F is
+   the single leading accent; cobalt #2B3FE0 appears sparingly (links,
+   small data accents); sage #4C8055 is functional success inside product
+   UI only. No gradient text, no rainbow marquee, no glow halos. */
 body {
-  background: #070b16;
-  color: #e5e7eb;
+  background: #faf6ef;
+  color: #1b1712;
 }
 
 ::selection {
-  background: rgba(217, 70, 239, 0.35);
+  background: rgba(232, 73, 15, 0.25);
 }
 
-/* ---- Aurora blobs (landing + auth visual panels) ---------------------- */
-.aurora {
-  position: absolute;
-  border-radius: 9999px;
-  filter: blur(70px);
-  pointer-events: none;
-}
-.aurora-a {
-  width: 480px; height: 480px; top: -160px; left: -120px;
-  animation: aurora-drift-a 18s ease-in-out infinite alternate;
-}
-.aurora-b {
-  width: 420px; height: 420px; bottom: -180px; right: -100px;
-  animation: aurora-drift-b 22s ease-in-out infinite alternate;
-}
-.aurora-c {
-  width: 260px; height: 260px; top: 38%; left: 52%;
-  animation: aurora-drift-a 26s ease-in-out infinite alternate-reverse;
-}
-@keyframes aurora-drift-a {
-  from { transform: translate(0, 0) scale(1); }
-  to { transform: translate(70px, 46px) scale(1.14); }
-}
-@keyframes aurora-drift-b {
-  from { transform: translate(0, 0) scale(1.08); }
-  to { transform: translate(-60px, -52px) scale(0.94); }
-}
-
-/* ---- Marquee (landing signals strip) --------------------------------- */
+/* ---- Ink marquee (landing signals strip) ------------------------------
+   An ink band with paper text scrolling through it; vermillion rules
+   separate the words. Pure CSS; GSAP handles the rest of the page. */
 @keyframes marquee-scroll {
   from { transform: translateX(0); }
   to { transform: translateX(-50%); }
@@ -47,15 +26,46 @@ body {
 .marquee-track {
   display: flex;
   width: max-content;
-  animation: marquee-scroll 30s linear infinite;
+  animation: marquee-scroll 32s linear infinite;
 }
 .marquee-track:hover {
   animation-play-state: paused;
 }
 
+/* ---- CTA micro-interactions -------------------------------------------
+   Vermillion buttons lift a hair and deepen; paper buttons fill with ink.
+   Transform/colour only — cheap and calm. */
+.cta-lift {
+  transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.25s ease, color 0.25s ease, border-color 0.25s ease;
+}
+.cta-lift:hover {
+  transform: translateY(-2px);
+}
+.cta-lift:active {
+  transform: translateY(0);
+}
+
+/* Animated underline for text links (cobalt sweep). */
+.link-sweep {
+  background-image: linear-gradient(currentColor, currentColor);
+  background-size: 0% 1px;
+  background-repeat: no-repeat;
+  background-position: 0 100%;
+  transition: background-size 0.3s ease;
+}
+.link-sweep:hover {
+  background-size: 100% 1px;
+}
+
 /* ---- Reduced motion: kill CSS animation; GSAP checks the same query -- */
 @media (prefers-reduced-motion: reduce) {
-  .aurora, .marquee-track {
+  .marquee-track {
     animation: none !important;
+  }
+  .cta-lift {
+    transition: none;
+  }
+  .cta-lift:hover {
+    transform: none;
   }
 }

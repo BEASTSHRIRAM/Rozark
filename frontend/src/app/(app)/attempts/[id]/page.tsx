@@ -1,13 +1,16 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
+import SandboxTerminal from "@/components/SandboxTerminal";
 
 // ---------------------------------------------------------------------------
-// Attempt workspace — HirePrise-inspired 3-pane layout (SCAFFOLD).
+// Attempt workspace — HirePrise-inspired 3-pane layout.
 // Brief LEFT · Code/files MIDDLE · AI agent panel RIGHT.
-// Live sandbox wiring (websocket PTY via xterm.js, Monaco, real agent
-// session) is NOT implemented yet — see docs/SANDBOX.md. Everything below
-// is clearly-labelled demo/mock data rendered in the target layout.
+// The TERMINAL at the bottom of the middle pane is LIVE (increment 3):
+// a real websocket PTY into a per-attempt sandbox workspace, recorded
+// into the event log (docs/SANDBOX.md). The brief/code/agent panes are
+// still clearly-labelled demo/mock data rendered in the target layout;
+// Monaco, the countdown timer, and the in-sandbox agent come next.
 // ---------------------------------------------------------------------------
 
 const DEMO = {
@@ -46,7 +49,8 @@ const DEMO = {
   ],
 };
 
-const phaseColor: Record<string, string> = { planning: "bg-sky-600", building: "bg-emerald-600", debugging: "bg-amber-600" };
+// Muted phase accents — functional micro-accents inside product UI only.
+const phaseColor: Record<string, string> = { planning: "bg-violet-400/70", building: "bg-cyan-300/60", debugging: "bg-amber-400/70" };
 
 function BudgetBar() {
   const b = DEMO.budget;
@@ -86,10 +90,12 @@ export default function AttemptPage({ params }: { params: { id: string } }) {
           <button className="rounded bg-emerald-600 px-4 py-2 text-sm font-semibold" title="Scaffold: submit freezes the workspace — see docs/SANDBOX.md">Submit (scaffold)</button>
         </div>
       </div>
-      <p className="rounded border border-amber-700/60 bg-amber-950/40 px-3 py-2 text-xs text-amber-200">
-        Scaffold layout — not a live sandbox yet. Panes, timer, budget bar and prompts below are demo/mock data in the exact
-        HirePrise-inspired 3-pane arrangement Rozark will ship; the live version streams a websocket PTY (xterm.js) + Monaco
-        from a per-session Docker container and records every event (docs/SANDBOX.md, docs/EVENT_LOG_SCHEMA.md).
+      <p className="rounded border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-gray-300">
+        The <strong className="text-gray-100">terminal below the code pane is live</strong>: Start opens a real sandbox
+        workspace for this attempt (isolated copy of the challenge project, git-initialised) and streams a websocket PTY
+        into it — commands, output, file edits and git snapshots are recorded to the event log. The brief, code preview,
+        timer, budget bar and agent panel are still demo/mock scaffold in the target 3-pane layout (Monaco editor +
+        in-sandbox agent are next — docs/SANDBOX.md).
       </p>
       <div className="w-full max-w-md"><BudgetBar /></div>
 
@@ -144,15 +150,19 @@ export default function AttemptPage({ params }: { params: { id: string } }) {
                   </li>
                 ))}
               </ul>
-              <p className="mt-3 px-1 text-[11px] text-gray-600">Terminal (xterm.js + websocket PTY) mounts here in the live sandbox — scaffold.</p>
+              <p className="mt-3 px-1 text-[11px] text-gray-600">File explorer is a static preview — the live terminal below works in the real workspace.</p>
             </aside>
             <div className="bg-gray-950 p-3">
               <pre className="font-mono text-xs leading-6 text-gray-200">{DEMO.codePreview.map((l, i) => <div key={i}><span className="mr-3 text-gray-600">{i + 1}</span>{l}</div>)}</pre>
               <p className="mt-3 text-[11px] text-gray-600">Monaco editor in the live build — this is a static preview (scaffold).</p>
             </div>
           </div>
-          <div className="flex justify-between border-t border-gray-700 bg-indigo-950/60 px-3 py-1 text-[11px] text-gray-300">
-            <span>main · rozark-sandbox (scaffold)</span><span>Python 3.12 · UTF-8 · recorded ●</span>
+          <div className="border-t border-gray-700 bg-gray-900/60 p-3">
+            <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Sandbox terminal — live</p>
+            <SandboxTerminal attemptId={params.id} submitted={false} />
+          </div>
+          <div className="flex justify-between border-t border-gray-700 bg-white/[0.02] px-3 py-1 text-[11px] text-gray-300">
+            <span>main · rozark-sandbox</span><span>Python 3.12 · UTF-8 · recorded ●</span>
           </div>
         </section>
 
