@@ -3,9 +3,11 @@ import json
 import os
 import select
 import threading
+import httpx
 from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI, HTTPException, Header, Response, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from .models import *
 from .store import store
@@ -253,6 +255,66 @@ def get_budget(attempt_id: str):
     att=store.attempts.get(attempt_id)
     if not att: raise HTTPException(404,"Attempt not found")
     return recorder.budget_summary(att)
+
+# ---------------------------------------------------------------------------
+# Agent budget proxy (B6): the ONLY path from a candidate session to the
+# model API. The key never reaches the browser/sandbox; every call is
+# recorded (prompt -> token_usage -> agent_response) and the recorder's
+# hard stop refuses agent activity once the token cap is hit.
+# ---------------------------------------------------------------------------
+
+def _ai_api_key() -> str:
+    return os.environ.get("ROZARK_AI_API_KEY") or os.environ.get("ANTHROPIC_API_KEY") or ""
+
+def _ai_model(challenge=None) -> str:
+    if challenge is not None and challenge.agent_config.model:
+        return challenge.agent_config.model
+    return os.environ.get("ROZARK_AI_MODEL") or "claude-sonnet-4-5"
+
+@app.get("/agent/status", response_model=AgentStatus)
+def agent_status():
+    return AgentStatus(configured=bool(_ai_api_key()), provider="anthropic", model=_ai_model())
+
+@app.post("/attempts/{attempt_id}/agent/chat", response_model=AgentChatResponse)
+def agent_chat(attempt_id: str, body: AgentChatRequest):
+    att=store.attempts.get(attempt_id)
+    if not att: raise HTTPException(404,"Attempt not found")
+    if att.status=="submitted": raise HTTPException(409,"Attempt already submitted - session is frozen")
+    if att.budget_hard_stop:
+        raise HTTPException(403, f"Token budget hard stop is active for attempt {att.id} ({att.tokens_used}/{att.token_budget} tokens used).")
+    key=_ai_api_key()
+    if not key:
+        return JSONResponse(status_code=503, content={"detail": "Agent proxy is not configured: set ROZARK_AI_API_KEY (or ANTHROPIC_API_KEY) on the backend.", "code": "agent_not_configured"})
+    ch=store.challenges.get(att.challenge_id)
+    model=_ai_model(ch)
+    try:
+        recorder.append(att, SessionEventCreate(type=EventType.prompt, actor=Actor.candidate, payload={"text": body.prompt, "phase": body.phase, "mode": body.mode, "via": "agent_proxy"}))
+    except BudgetHardStop as e:
+        raise HTTPException(403, str(e))
+    system_prompt=(f"You are an AI coding agent helping a candidate inside a recorded Rozark assessment sandbox. "
+                   f"Challenge: {ch.title if ch else att.challenge_id}. "
+                   "Your prompts, tool use and responses are recorded and scored as collaboration evidence. Be concise and concrete.")
+    try:
+        http=httpx.Client(timeout=60)
+        resp=http.post("https://api.anthropic.com/v1/messages",
+                       headers={"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+                       json={"model": model, "max_tokens": 1024, "system": system_prompt,
+                             "messages": [{"role": "user", "content": body.prompt}]})
+    except httpx.HTTPError as e:
+        raise HTTPException(502, f"Agent provider request failed: {e}")
+    if resp.status_code != 200:
+        raise HTTPException(502, f"Agent provider returned HTTP {resp.status_code}")
+    try: data=resp.json()
+    except ValueError: raise HTTPException(502, "Agent provider returned invalid JSON")
+    text="".join(str(b.get("text","")) for b in data.get("content", []) if isinstance(b, dict) and b.get("type")=="text")
+    usage=data.get("usage", {}) or {}
+    try: tokens_in=int(usage.get("input_tokens", 0) or 0)
+    except (TypeError, ValueError): tokens_in=0
+    try: tokens_out=int(usage.get("output_tokens", 0) or 0)
+    except (TypeError, ValueError): tokens_out=0
+    recorder.append(att, SessionEventCreate(type=EventType.token_usage, actor=Actor.system, payload={"tokens_in": tokens_in, "tokens_out": tokens_out, "phase": body.phase, "via": "agent_proxy"}))
+    recorder.append(att, SessionEventCreate(type=EventType.agent_response, actor=Actor.agent, payload={"text": text, "phase": body.phase, "via": "agent_proxy"}))
+    return AgentChatResponse(response_text=text, tokens_in=tokens_in, tokens_out=tokens_out, budget=recorder.budget_summary(att))
 
 # ---------------------------------------------------------------------------
 # Workspace files (B5): the editor's view of the sandbox workspace. Reads
