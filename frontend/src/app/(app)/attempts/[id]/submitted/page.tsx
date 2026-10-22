@@ -75,8 +75,9 @@ export default function SubmittedPage({ params }: { params: { id: string } }) {
       ) : null}
 
       <div className="flex flex-wrap gap-3">
-        <Link className="rounded bg-vermilliondeep px-4 py-2 text-sm font-semibold text-white" href={`/reports/${id}`}>View evidence report →</Link>
-        <Link className="rounded border border-gray-600 px-4 py-2 text-sm text-gray-200" href={`/attempts/${id}/replay`}>Watch session replay →</Link>
+        {/* Candidate end screen: only candidate-legit navigation. The
+            evidence report and session replay are recruiter review
+            surfaces — no links to them from here. */}
         <Link className="rounded border border-gray-600 px-4 py-2 text-sm text-gray-200" href={`/attempts/${id}`}>Open frozen workspace</Link>
       </div>
     </div>
