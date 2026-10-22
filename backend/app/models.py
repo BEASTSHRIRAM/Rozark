@@ -56,12 +56,21 @@ class ScoringSettings(BaseModel):
     # Test CASE names the candidate must never see (names/assertions stay
     # hidden; only pass/total counts are exposed — see /tests/public).
     hidden_tests: list[str]=Field(default_factory=list)
+class AgentMode(str, Enum):
+    # Recruiter-controlled (Sriram's rule): the challenge author alone
+    # decides what the candidate's side-panel AI is. "mentor" = the
+    # diagnose-only LangGraph mentor; "agent" = a full LangGraph agent
+    # that may edit files and run commands in the sandbox. The candidate
+    # can never switch it — the chat endpoint reads the mode from the
+    # challenge and ignores any mode claimed in the request payload.
+    mentor="mentor"; agent="agent"
 class AgentConfig(BaseModel):
     allowed_agents: list[str]=Field(default_factory=lambda:["claude_code","codex"])
     model: Optional[str]=None
     token_budget: int=Field(default=100000, ge=0)
     time_limit_minutes: Optional[int]=None
     internet_enabled: bool=False
+    agent_mode: AgentMode=AgentMode.mentor
 class RubricWeights(BaseModel):
     functional: float=Field(default=0.4, ge=0.0, le=1.0)
     ai_collaboration: float=Field(default=0.6, ge=0.0, le=1.0)
@@ -230,6 +239,9 @@ class SessionStatus(BaseModel):
     time_limit_minutes: int=0
     budget: Optional[TokenBudgetSummary]=None
     sandbox_status: str="not_started"
+    # Effective side-panel AI mode for this attempt (from the challenge's
+    # recruiter-set agent_config.agent_mode; "mentor" when unset).
+    agent_mode: str="mentor"
 
 class WorkspaceFile(BaseModel):
     path: str
@@ -287,11 +299,18 @@ class AgentChatResponse(BaseModel):
     tokens_in: int
     tokens_out: int
     budget: Optional[TokenBudgetSummary]=None
+    # Effective mode the backend actually ran (always the challenge's
+    # recruiter-set mode — never the request payload's claim).
+    agent_mode: str="mentor"
     # Mentor structure (parsed from the SYMPTOM / WHERE / HINT reply).
     symptom: str=""
     where: str=""
     hint: str=""
     guardrail_intervened: bool=False
+    # Agent mode only: the tool_call session events recorded during this
+    # turn (actor "agent"), so the panel can render the activity feed
+    # immediately; the same events are in the session log for the report.
+    tool_events: list[SessionEvent]=Field(default_factory=list)
 
 class PublicTestItem(BaseModel):
     name: str

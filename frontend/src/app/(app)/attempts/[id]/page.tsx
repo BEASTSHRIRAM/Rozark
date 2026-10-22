@@ -394,6 +394,22 @@ export default function AttemptPage({ params }: { params: { id: string } }) {
     setTimeout(() => { loadFiles(); }, 1200);
   }
 
+  // After the full agent edits files, refresh the tree and re-read any
+  // open tab whose on-disk content changed — without clobbering the
+  // candidate's own unsaved edits (content !== saved means dirty).
+  async function refreshAfterAgent() {
+    await loadFiles();
+    for (const t of tabs) {
+      if (t.content !== t.saved) continue;
+      try {
+        const f = await readFile(id, t.path);
+        if (f.content !== t.saved) {
+          setTabs((prev) => prev.map((x) => x.path === t.path && x.content === x.saved ? { ...x, content: f.content, saved: f.content } : x));
+        }
+      } catch { /* the file may have been removed by the agent */ }
+    }
+  }
+
   const remaining = session?.expires_at ? Math.max(0, (new Date(session.expires_at).getTime() - now) / 1000) : session ? session.remaining_seconds : null;
   const elapsedPct = session?.time_limit_minutes && remaining !== null ? Math.min(100, Math.max(0, (1 - remaining / (session.time_limit_minutes * 60)) * 100)) : 0;
 
@@ -690,7 +706,7 @@ export default function AttemptPage({ params }: { params: { id: string } }) {
           {/* SECONDARY SIDEBAR — mentor + public tests (unchanged panels) */}
           <div className="w-full shrink-0 space-y-4 p-3 lg:max-h-[880px] lg:w-[330px] lg:overflow-y-auto">
             <div id="rz-mentor" className="scroll-mt-24">
-              <AgentPanel attemptId={id} submitted={!!submitted} onBudget={setBudget} />
+              <AgentPanel attemptId={id} submitted={!!submitted} onBudget={setBudget} onAgentActivity={refreshAfterAgent} />
             </div>
             <div id="rz-tests" className="scroll-mt-24">
               <PublicTestsPanel attemptId={id} />
