@@ -28,7 +28,7 @@ class EventType(str, Enum):
     terminal_cmd="terminal_cmd"; terminal_output="terminal_output"
     paste_event="paste_event"; clipboard_event="clipboard_event"; tab_switch="tab_switch"
     token_usage="token_usage"; git_snapshot="git_snapshot"
-    budget_exceeded="budget_exceeded"; session_submitted="session_submitted"
+    budget_exceeded="budget_exceeded"; session_submitted="session_submitted"; session_expired="session_expired"
 
 DIFFICULTY_DEFAULTS={Difficulty.easy:(50,15), Difficulty.medium:(75,30), Difficulty.hard:(100,60)}
 
@@ -122,6 +122,11 @@ class Attempt(BaseModel):
     budget_exceeded: bool=False
     budget_hard_stop: bool=False
     events: list[SessionEvent]=Field(default_factory=list)
+    # --- session lifecycle (B3) ---
+    started_at: str=""
+    last_heartbeat_at: str=""
+    time_limit_minutes: int=0
+    expires_at: str=""
 class SubmitRequest(BaseModel):
     junit_xml: Optional[str]=None
     tap_output: Optional[str]=None
@@ -132,6 +137,19 @@ class DimensionScore(BaseModel):
     score: float
     evidence_event_ids: list[str]=Field(default_factory=list)
     notes: str=""
+class ReportSignal(BaseModel):
+    text: str
+    evidence_event_ids: list[str]=Field(default_factory=list)
+class ReportMetrics(BaseModel):
+    prompts_total: int=0
+    prompts_by_phase: dict[str,int]=Field(default_factory=dict)
+    tokens_used: int=0
+    token_budget: int=0
+    test_runs: int=0
+    files_edited: int=0
+    git_snapshots: int=0
+    duration_seconds: int=0
+    time_to_first_edit_seconds: Optional[int]=None
 class Report(BaseModel):
     attempt_id: str
     challenge_id: str
@@ -141,6 +159,10 @@ class Report(BaseModel):
     total_score: float
     breakdown: list[DimensionScore]=Field(default_factory=list)
     timeline: list[SessionEvent]=Field(default_factory=list)
+    verdict: str=""
+    signals: list[ReportSignal]=Field(default_factory=list)
+    concerns: list[ReportSignal]=Field(default_factory=list)
+    metrics: Optional[ReportMetrics]=None
 class TokenBudgetSummary(BaseModel):
     budget: int
     used: int
@@ -192,3 +214,84 @@ class Replay(BaseModel):
     events: list[SessionEvent]=Field(default_factory=list)
     git_snapshots: list[dict[str,Any]]=Field(default_factory=list)
     token_budget: Optional[TokenBudgetSummary]=None
+
+class MeUpdate(BaseModel):
+    name: Optional[str]=None
+    company_name: Optional[str]=None
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+class OrgInfo(BaseModel):
+    company_name: str
+    member_count: int
+    challenge_count: int
+    attempt_count: int
+
+class SessionStatus(BaseModel):
+    attempt_id: str
+    status: str
+    started_at: str=""
+    expires_at: str=""
+    elapsed_seconds: int=0
+    remaining_seconds: int=0
+    time_limit_minutes: int=0
+    budget: Optional[TokenBudgetSummary]=None
+    sandbox_status: str="not_started"
+
+class EventsBatchRequest(BaseModel):
+    events: list[SessionEventCreate]=Field(default_factory=list)
+class EventsBatchResponse(BaseModel):
+    accepted: int
+    events: list[SessionEvent]=Field(default_factory=list)
+class EventsSummary(BaseModel):
+    total: int
+    by_type: dict[str,int]=Field(default_factory=dict)
+    by_actor: dict[str,int]=Field(default_factory=dict)
+    by_stream: dict[str,int]=Field(default_factory=dict)
+
+class WorkspaceFile(BaseModel):
+    path: str
+    size: int
+    read_only: bool=False
+    hidden: bool=False
+class FileListResponse(BaseModel):
+    attempt_id: str
+    files: list[WorkspaceFile]=Field(default_factory=list)
+class FileContentResponse(BaseModel):
+    path: str
+    content: str
+    read_only: bool=False
+class FileWriteRequest(BaseModel):
+    path: str
+    content: str
+class FileWriteResponse(BaseModel):
+    path: str
+    size: int
+
+class AgentStatus(BaseModel):
+    configured: bool
+    provider: str="anthropic"
+    model: str
+class AgentChatRequest(BaseModel):
+    prompt: str
+    phase: str="building"
+    mode: str="agent"
+class AgentChatResponse(BaseModel):
+    response_text: str
+    tokens_in: int
+    tokens_out: int
+    budget: Optional[TokenBudgetSummary]=None
+
+class ScoreRun(BaseModel):
+    id: str
+    attempt_id: str
+    command: str
+    exit_code: int=0
+    score: float=0.0
+    source: str="none"  # fs_score | junit | tap | none
+    stdout_tail: str=""
+    ran_at: str=""
+class ScoreRunHistory(BaseModel):
+    attempt_id: str
+    latest: Optional[ScoreRun]=None
+    runs: list[ScoreRun]=Field(default_factory=list)

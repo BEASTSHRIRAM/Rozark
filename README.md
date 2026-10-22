@@ -82,12 +82,37 @@ docs/               PRODUCT, ARCHITECTURE, CHALLENGE_SCHEMA, SCORING_RUBRIC,
                     EVENT_LOG_SCHEMA, SANDBOX
 sandbox/            Challenge image (Dockerfile.challenge) + recorder sidecar
 sample-challenges/  Runnable example challenge(s)
-docker-compose.yml  PostgreSQL + backend + frontend
+docker-compose.yml  Backend + frontend (SQLite persistence on a volume)
 ```
 
-## How to run
+## Run it
 
-### Backend (no Docker needed — durable SQLite store)
+You need exactly one secret: an Anthropic API key. Everything else has a
+working default.
+
+```bash
+cp .env.example .env   # then put ANTHROPIC_API_KEY=... in .env
+```
+
+### Option A — Docker Compose (one command)
+
+```bash
+docker compose up --build
+# frontend http://localhost:3000   backend http://localhost:8000
+```
+
+Demo login: **demo@rozark.dev / demo1234**.
+
+Persistence is a single SQLite file (v1): compose mounts a named volume
+at `/data` and points the backend at `ROZARK_DB_PATH=/data/rozark.db`
+(sandbox workspaces live at `/data/workspaces` on the same volume), so
+data survives rebuilds. There is no Postgres service in v1 — the backend
+has never read a `DATABASE_URL`; Postgres is a future swap behind the
+store layer (`backend/app/store.py`).
+
+### Option B — Local dev (no Docker)
+
+Backend:
 
 ```bash
 cd backend
@@ -98,7 +123,7 @@ uvicorn app.main:app --reload --port 8000
 pytest -q
 ```
 
-### Frontend
+Frontend (separate terminal):
 
 ```bash
 cd frontend
@@ -106,6 +131,12 @@ npm install
 npm run dev
 # http://localhost:3000
 ```
+
+The backend reads configuration from environment variables (see
+`.env.example`): export them in your shell, or let Compose pass them via
+`env_file`. Without Docker the sandbox falls back to the **local-process
+backend** — a real PTY and real session recording; only container
+isolation differs.
 
 The landing page is `/`, the app lives behind login at `/dashboard`.
 
@@ -135,11 +166,14 @@ project. If you deploy this repo to Vercel:
 3. Set `NEXT_PUBLIC_API_URL` to your deployed backend URL (defaults to
    `http://localhost:8000` for local dev).
 
-### Full stack via Docker
+### Demo data (optional)
 
-```bash
-docker compose up --build
-```
+Set `ROZARK_SEED_DEMO=1` in `.env` (or your shell) and start the backend:
+it seeds one demo attempt ("Demo Candidate") on the sample challenge with
+a realistic recorded session, already submitted and scored through the
+real scoring path, so `GET /attempts/{id}/report` returns a real report
+on first boot. The seed is idempotent (a second boot changes nothing) and
+off by default.
 
 ## Status
 
