@@ -28,7 +28,7 @@ class EventType(str, Enum):
     terminal_cmd="terminal_cmd"; terminal_output="terminal_output"
     paste_event="paste_event"; clipboard_event="clipboard_event"; tab_switch="tab_switch"
     token_usage="token_usage"; git_snapshot="git_snapshot"
-    budget_exceeded="budget_exceeded"; session_submitted="session_submitted"
+    budget_exceeded="budget_exceeded"; session_submitted="session_submitted"; session_expired="session_expired"
 
 DIFFICULTY_DEFAULTS={Difficulty.easy:(50,15), Difficulty.medium:(75,30), Difficulty.hard:(100,60)}
 
@@ -122,6 +122,11 @@ class Attempt(BaseModel):
     budget_exceeded: bool=False
     budget_hard_stop: bool=False
     events: list[SessionEvent]=Field(default_factory=list)
+    # --- session lifecycle (B3) ---
+    started_at: str=""
+    last_heartbeat_at: str=""
+    time_limit_minutes: int=0
+    expires_at: str=""
 class SubmitRequest(BaseModel):
     junit_xml: Optional[str]=None
     tap_output: Optional[str]=None
@@ -204,3 +209,14 @@ class OrgInfo(BaseModel):
     member_count: int
     challenge_count: int
     attempt_count: int
+
+class SessionStatus(BaseModel):
+    attempt_id: str
+    status: str
+    started_at: str=""
+    expires_at: str=""
+    elapsed_seconds: int=0
+    remaining_seconds: int=0
+    time_limit_minutes: int=0
+    budget: Optional[TokenBudgetSummary]=None
+    sandbox_status: str="not_started"

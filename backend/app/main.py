@@ -3,6 +3,7 @@ import json
 import os
 import select
 import threading
+from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI, HTTPException, Header, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -163,6 +164,12 @@ def start_attempt(body: AttemptCreate):
     att=Attempt(id=store.next_attempt_id(), **body.model_dump())
     att.session_id=att.id
     att.token_budget=ch.agent_config.token_budget
+    _now_dt=datetime.now(timezone.utc)
+    att.started_at=_now_dt.isoformat().replace("+00:00","Z")
+    _limit=ch.agent_config.time_limit_minutes
+    if _limit is None: _limit=ch.recommended_time_minutes or 0
+    att.time_limit_minutes=int(_limit)
+    att.expires_at=(_now_dt+timedelta(minutes=att.time_limit_minutes)).isoformat().replace("+00:00","Z")
     store.attempts[att.id]=att; return att
 
 @app.get("/attempts/{attempt_id}", response_model=Attempt)
@@ -176,6 +183,7 @@ def add_event(attempt_id: str, body: SessionEventCreate):
     att=store.attempts.get(attempt_id)
     if not att: raise HTTPException(404,"Attempt not found")
     if att.status=="submitted": raise HTTPException(409,"Attempt already submitted - session is frozen")
+    _maybe_expire(att)
     try:
         return recorder.append(att, body)
     except BudgetHardStop as e:
@@ -200,6 +208,62 @@ def get_budget(attempt_id: str):
     att=store.attempts.get(attempt_id)
     if not att: raise HTTPException(404,"Attempt not found")
     return recorder.budget_summary(att)
+
+# ---------------------------------------------------------------------------
+# Session lifecycle (B3): heartbeat + expiry. Expiry is lazy — checked on
+# heartbeat / session-get / event-post; when the limit has passed the
+# attempt flips to "expired", the sandbox is frozen best-effort, and a
+# session_expired event is recorded through the recorder.
+# ---------------------------------------------------------------------------
+
+def _parse_iso(v: str):
+    if not v: return None
+    try: return datetime.fromisoformat(v.replace("Z", "+00:00"))
+    except ValueError: return None
+
+def _maybe_expire(att: Attempt) -> bool:
+    if att.status != "in_progress": return False
+    exp = _parse_iso(att.expires_at)
+    if exp is None or datetime.now(timezone.utc) <= exp: return False
+    att.status = "expired"
+    store.save_attempt(att)
+    try: sandbox_manager.freeze(att, reason="time_expired")
+    except Exception: pass
+    try:
+        recorder.append(att, SessionEventCreate(type=EventType.session_expired, actor=Actor.system, payload={"reason": "time_limit"}))
+    except Exception: pass
+    store.save_attempt(att)
+    return True
+
+def _session_status(att: Attempt) -> SessionStatus:
+    now = datetime.now(timezone.utc)
+    started = _parse_iso(att.started_at)
+    exp = _parse_iso(att.expires_at)
+    elapsed = int((now - started).total_seconds()) if started else 0
+    remaining = int((exp - now).total_seconds()) if exp else 0
+    info = sandbox_manager.info(att, sandbox_manager.get(att.id))
+    return SessionStatus(
+        attempt_id=att.id, status=att.status, started_at=att.started_at,
+        expires_at=att.expires_at, elapsed_seconds=max(0, elapsed),
+        remaining_seconds=max(0, remaining), time_limit_minutes=att.time_limit_minutes,
+        budget=recorder.budget_summary(att), sandbox_status=info.status)
+
+@app.post("/attempts/{attempt_id}/heartbeat", response_model=SessionStatus)
+def heartbeat(attempt_id: str):
+    att=store.attempts.get(attempt_id)
+    if not att: raise HTTPException(404,"Attempt not found")
+    _maybe_expire(att)
+    if att.status=="in_progress":
+        att.last_heartbeat_at=datetime.now(timezone.utc).isoformat().replace("+00:00","Z")
+        store.save_attempt(att)
+    return _session_status(att)
+
+@app.get("/attempts/{attempt_id}/session", response_model=SessionStatus)
+def get_session(attempt_id: str):
+    att=store.attempts.get(attempt_id)
+    if not att: raise HTTPException(404,"Attempt not found")
+    _maybe_expire(att)
+    return _session_status(att)
 
 # ---------------------------------------------------------------------------
 # Live sandbox (app/sandbox.py, docs/SANDBOX.md). Start materialises an
