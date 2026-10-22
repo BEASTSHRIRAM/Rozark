@@ -1,22 +1,41 @@
+# Rozark — full stack via Docker Compose.
+#
+#   cp .env.example .env   # then put ANTHROPIC_API_KEY in .env
+#   docker compose up --build
+#   -> frontend http://localhost:3000   backend http://localhost:8000
+#   -> demo login: demo@rozark.dev / demo1234
+#
+# Persistence (v1, honest): the backend stores everything in a single
+# SQLite file via ROZARK_DB_PATH (backend/app/store.py) — there is NO
+# Postgres in v1 and the backend reads no DATABASE_URL. The SQLite file
+# and the sandbox workspaces live on the named volume below so data
+# survives container rebuilds. Postgres is a future swap behind the
+# store layer, not a current service.
 services:
-  db:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: rozark
-      POSTGRES_PASSWORD: rozark
-      POSTGRES_DB: rozark
-    ports:
-      - "5432:5432"
-    volumes:
-      - rozark_db:/var/lib/postgresql/data
   backend:
-    build: ./backend
+    build:
+      # Repo-root context: backend/app/sandbox.py resolves REPO_ROOT as
+      # the parent of backend/ and imports sandbox/recorder_sidecar.py +
+      # reads sample-challenges/ from there, so the image must contain
+      # all three trees (see backend/Dockerfile).
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - .env
     environment:
-      DATABASE_URL: postgresql+psycopg://rozark:rozark@db:5432/rozark
+      # Paths inside the container (named volume) — these override .env.
+      ROZARK_DB_PATH: /data/rozark.db
+      ROZARK_WORKSPACES: /data/workspaces
+      # AI key passthrough from the host env / .env, with safe defaults.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ROZARK_AI_API_KEY: ${ROZARK_AI_API_KEY:-}
+      ROZARK_AI_MODEL: ${ROZARK_AI_MODEL:-claude-sonnet-4-5}
+      ROZARK_JWT_SECRET: ${ROZARK_JWT_SECRET:-change-me-in-production}
+      ROZARK_SANDBOX_BACKEND: ${ROZARK_SANDBOX_BACKEND:-local}
     ports:
       - "8000:8000"
-    depends_on:
-      - db
+    volumes:
+      - rozark_data:/data
   frontend:
     build: ./frontend
     environment:
@@ -26,4 +45,4 @@ services:
     depends_on:
       - backend
 volumes:
-  rozark_db:
+  rozark_data:
