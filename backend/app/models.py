@@ -220,3 +220,14 @@ class SessionStatus(BaseModel):
     time_limit_minutes: int=0
     budget: Optional[TokenBudgetSummary]=None
     sandbox_status: str="not_started"
+
+class EventsBatchRequest(BaseModel):
+    events: list[SessionEventCreate]=Field(default_factory=list)
+class EventsBatchResponse(BaseModel):
+    accepted: int
+    events: list[SessionEvent]=Field(default_factory=list)
+class EventsSummary(BaseModel):
+    total: int
+    by_type: dict[str,int]=Field(default_factory=dict)
+    by_actor: dict[str,int]=Field(default_factory=dict)
+    by_stream: dict[str,int]=Field(default_factory=dict)
