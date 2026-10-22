@@ -192,3 +192,15 @@ class Replay(BaseModel):
     events: list[SessionEvent]=Field(default_factory=list)
     git_snapshots: list[dict[str,Any]]=Field(default_factory=list)
     token_budget: Optional[TokenBudgetSummary]=None
+
+class MeUpdate(BaseModel):
+    name: Optional[str]=None
+    company_name: Optional[str]=None
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+class OrgInfo(BaseModel):
+    company_name: str
+    member_count: int
+    challenge_count: int
+    attempt_count: int
