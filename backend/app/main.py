@@ -189,11 +189,56 @@ def add_event(attempt_id: str, body: SessionEventCreate):
     except BudgetHardStop as e:
         raise HTTPException(403, str(e))
 
-@app.get("/attempts/{attempt_id}/events", response_model=list[SessionEvent])
-def list_events(attempt_id: str):
+@app.post("/attempts/{attempt_id}/events/batch", response_model=EventsBatchResponse, status_code=201)
+def add_events_batch(attempt_id: str, body: EventsBatchRequest):
     att=store.attempts.get(attempt_id)
     if not att: raise HTTPException(404,"Attempt not found")
-    return recorder.ordered_events(att)
+    if att.status=="submitted": raise HTTPException(409,"Attempt already submitted - session is frozen")
+    _maybe_expire(att)
+    accepted: list[SessionEvent]=[]
+    try:
+        for item in body.events:
+            accepted.append(recorder.append(att, item))
+    except BudgetHardStop as e:
+        # Events appended before the hard stop stay in the log (recorder
+        # persists each append); the batch as a whole is refused with 403.
+        raise HTTPException(403, str(e))
+    return EventsBatchResponse(accepted=len(accepted), events=accepted)
+
+@app.get("/attempts/{attempt_id}/events", response_model=list[SessionEvent])
+def list_events(attempt_id: str, types: str | None = None, actor: str | None = None,
+                since_seq: int | None = None, limit: int | None = None, offset: int | None = None):
+    att=store.attempts.get(attempt_id)
+    if not att: raise HTTPException(404,"Attempt not found")
+    out=recorder.ordered_events(att)
+    if types:
+        wanted={t.strip() for t in types.split(",") if t.strip()}
+        out=[e for e in out if e.type.value in wanted]
+    if actor:
+        out=[e for e in out if e.actor.value==actor]
+    if since_seq is not None:
+        out=[e for e in out if e.seq>since_seq]
+    if offset:
+        out=out[offset:]
+    if limit is not None:
+        out=out[:limit]
+    return out
+
+_STREAM_MAP={"terminal_cmd":"terminal","terminal_output":"terminal","terminal":"terminal",
+             "file_edit":"files","file_view":"files","git_snapshot":"files",
+             "prompt":"agent","tool_call":"agent","agent_response":"agent","token_usage":"agent"}
+
+@app.get("/attempts/{attempt_id}/events/summary", response_model=EventsSummary)
+def events_summary(attempt_id: str):
+    att=store.attempts.get(attempt_id)
+    if not att: raise HTTPException(404,"Attempt not found")
+    by_type: dict[str,int]={}; by_actor: dict[str,int]={}
+    by_stream: dict[str,int]={"terminal":0,"files":0,"agent":0,"system":0}
+    for e in recorder.ordered_events(att):
+        by_type[e.type.value]=by_type.get(e.type.value,0)+1
+        by_actor[e.actor.value]=by_actor.get(e.actor.value,0)+1
+        by_stream[_STREAM_MAP.get(e.type.value,"system")]+=1
+    return EventsSummary(total=len(att.events), by_type=by_type, by_actor=by_actor, by_stream=by_stream)
 
 @app.get("/attempts/{attempt_id}/replay", response_model=Replay)
 def get_replay(attempt_id: str):
