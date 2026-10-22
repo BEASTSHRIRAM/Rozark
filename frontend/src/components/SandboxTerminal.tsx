@@ -42,7 +42,12 @@ export default function SandboxTerminal({ attemptId, submitted }: { attemptId: s
     // xterm is loaded client-side only (it needs a real DOM/canvas).
     const { Terminal } = await import("@xterm/xterm");
     const { FitAddon } = await import("@xterm/addon-fit");
-    if (!mountRef.current) return;
+    // The mount div is ALWAYS rendered (see below) — a previous version
+    // rendered it only outside the idle/starting states, so at connect
+    // time it did not exist yet, this guard bailed silently, and the
+    // panel sat on "Starting sandbox…" forever.
+    if (!mountRef.current) { setState("offline"); setError("Terminal mount missing — reload the page."); return; }
+    (mountRef.current as unknown as { _rzCleanup?: () => void })._rzCleanup?.();
     mountRef.current.innerHTML = "";
     const term = new Terminal({
       cursorBlink: true, fontSize: 12.5, convertEol: false,
@@ -139,9 +144,14 @@ export default function SandboxTerminal({ attemptId, submitted }: { attemptId: s
         {session?.backend_note && <span className="text-[11px] text-[#E0A458]/90">{session.backend_note}</span>}
         {error && <span className="text-[11px] text-red-300">{error}</span>}
       </div>
-      <div className="min-h-[220px] flex-1 overflow-hidden rounded-lg border border-white/10 bg-[#0b0f1c] p-1.5">
-        {state === "idle" || state === "starting" ? (
-          <div className="flex h-full min-h-[200px] flex-col items-start justify-center gap-2 p-3 font-mono text-[11px] leading-5 text-gray-500">
+      <div className="relative min-h-[220px] flex-1 overflow-hidden rounded-lg border border-white/10 bg-[#0b0f1c] p-1.5">
+        {/* Mount is always in the DOM: connect() runs while state is
+            "starting", so swapping this div in only after connect would
+            deadlock the terminal on "Starting sandbox…". The idle /
+            starting placeholder is an overlay on top of it instead. */}
+        <div ref={mountRef} className="h-full min-h-[200px] w-full" />
+        {(state === "idle" || state === "starting") && (
+          <div className="absolute inset-0 flex h-full flex-col items-start justify-center gap-2 p-3 font-mono text-[11px] leading-5 text-gray-500">
             <p>$ — no sandbox session yet</p>
             <p className="text-gray-600">
               Start creates an isolated workspace (copy of the challenge starter project, git-initialised),
@@ -149,8 +159,6 @@ export default function SandboxTerminal({ attemptId, submitted }: { attemptId: s
               into this attempt&apos;s event log.
             </p>
           </div>
-        ) : (
-          <div ref={mountRef} className="h-full min-h-[200px] w-full" />
         )}
       </div>
       <p className="mt-1.5 text-[10px] text-gray-600">
