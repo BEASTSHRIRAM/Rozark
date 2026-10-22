@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .models import *
 from .store import store
 from .seed import seed
-from .scoring import compute_functional_score, compute_collaboration, parse_fs_score, parse_junit_xml, parse_tap
+from .scoring import compute_functional_score, compute_collaboration, compute_report_extras, parse_fs_score, parse_junit_xml, parse_tap
 from .recorder import recorder, BudgetHardStop
 from .auth import hash_password, verify_password, create_token, current_user_id
 from .sandbox import sandbox_manager, SandboxUnavailable, TerminalInputTap, TerminalOutputTap, workspace_path_for
@@ -70,6 +70,45 @@ def me(authorization: str | None = Header(default=None)):
         if rec.id == user_id:
             return _public_user(rec)
     raise HTTPException(404, "User not found")
+
+def _current_user_record(authorization: str | None) -> UserRecord:
+    user_id = current_user_id(authorization)
+    for rec in store.users.values():
+        if rec.id == user_id: return rec
+    raise HTTPException(404, "User not found")
+
+@app.get("/org", response_model=OrgInfo)
+def get_org(authorization: str | None = Header(default=None)):
+    rec = _current_user_record(authorization)
+    members = [u for u in store.users.values() if u.company_name == rec.company_name]
+    # Challenges/attempts carry no owner field in this MVP store, so those
+    # counts are workspace-wide totals; member_count is truly org-scoped.
+    return OrgInfo(company_name=rec.company_name, member_count=len(members),
+                   challenge_count=len(store.challenges), attempt_count=len(store.attempts))
+
+@app.get("/org/members", response_model=list[User])
+def list_org_members(authorization: str | None = Header(default=None)):
+    rec = _current_user_record(authorization)
+    return [_public_user(u) for u in store.users.values() if u.company_name == rec.company_name]
+
+@app.patch("/auth/me", response_model=User)
+def update_me(body: MeUpdate, authorization: str | None = Header(default=None)):
+    rec = _current_user_record(authorization)
+    if body.name is not None and body.name.strip(): rec.name = body.name.strip()
+    if body.company_name is not None and body.company_name.strip(): rec.company_name = body.company_name.strip()
+    store.users[rec.email] = rec  # BlobDict write-through persists the mutation
+    return _public_user(rec)
+
+@app.post("/auth/change-password")
+def change_password(body: ChangePasswordRequest, authorization: str | None = Header(default=None)):
+    rec = _current_user_record(authorization)
+    if not verify_password(body.current_password, rec.password_hash):
+        raise HTTPException(401, "Current password is incorrect")
+    if len(body.new_password) < 8:
+        raise HTTPException(422, "New password must be at least 8 characters")
+    rec.password_hash = hash_password(body.new_password)
+    store.users[rec.email] = rec
+    return {"ok": True}
 
 @app.post("/challenges", response_model=Challenge, status_code=201)
 def create_challenge(body: ChallengeCreate):
@@ -153,11 +192,56 @@ def add_event(attempt_id: str, body: SessionEventCreate):
     except BudgetHardStop as e:
         raise HTTPException(403, str(e))
 
-@app.get("/attempts/{attempt_id}/events", response_model=list[SessionEvent])
-def list_events(attempt_id: str):
+@app.post("/attempts/{attempt_id}/events/batch", response_model=EventsBatchResponse, status_code=201)
+def add_events_batch(attempt_id: str, body: EventsBatchRequest):
     att=store.attempts.get(attempt_id)
     if not att: raise HTTPException(404,"Attempt not found")
-    return recorder.ordered_events(att)
+    if att.status=="submitted": raise HTTPException(409,"Attempt already submitted - session is frozen")
+    _maybe_expire(att)
+    accepted: list[SessionEvent]=[]
+    try:
+        for item in body.events:
+            accepted.append(recorder.append(att, item))
+    except BudgetHardStop as e:
+        # Events appended before the hard stop stay in the log (recorder
+        # persists each append); the batch as a whole is refused with 403.
+        raise HTTPException(403, str(e))
+    return EventsBatchResponse(accepted=len(accepted), events=accepted)
+
+@app.get("/attempts/{attempt_id}/events", response_model=list[SessionEvent])
+def list_events(attempt_id: str, types: str | None = None, actor: str | None = None,
+                since_seq: int | None = None, limit: int | None = None, offset: int | None = None):
+    att=store.attempts.get(attempt_id)
+    if not att: raise HTTPException(404,"Attempt not found")
+    out=recorder.ordered_events(att)
+    if types:
+        wanted={t.strip() for t in types.split(",") if t.strip()}
+        out=[e for e in out if e.type.value in wanted]
+    if actor:
+        out=[e for e in out if e.actor.value==actor]
+    if since_seq is not None:
+        out=[e for e in out if e.seq>since_seq]
+    if offset:
+        out=out[offset:]
+    if limit is not None:
+        out=out[:limit]
+    return out
+
+_STREAM_MAP={"terminal_cmd":"terminal","terminal_output":"terminal","terminal":"terminal",
+             "file_edit":"files","file_view":"files","git_snapshot":"files",
+             "prompt":"agent","tool_call":"agent","agent_response":"agent","token_usage":"agent"}
+
+@app.get("/attempts/{attempt_id}/events/summary", response_model=EventsSummary)
+def events_summary(attempt_id: str):
+    att=store.attempts.get(attempt_id)
+    if not att: raise HTTPException(404,"Attempt not found")
+    by_type: dict[str,int]={}; by_actor: dict[str,int]={}
+    by_stream: dict[str,int]={"terminal":0,"files":0,"agent":0,"system":0}
+    for e in recorder.ordered_events(att):
+        by_type[e.type.value]=by_type.get(e.type.value,0)+1
+        by_actor[e.actor.value]=by_actor.get(e.actor.value,0)+1
+        by_stream[_STREAM_MAP.get(e.type.value,"system")]+=1
+    return EventsSummary(total=len(att.events), by_type=by_type, by_actor=by_actor, by_stream=by_stream)
 
 @app.get("/attempts/{attempt_id}/replay", response_model=Replay)
 def get_replay(attempt_id: str):
@@ -248,7 +332,7 @@ def get_score(attempt_id: str):
 #
 # Provider selection (first configured wins):
 #   1. Groq — GROQ_API_KEY set: OpenAI-compatible chat completions at
-#      api.groq.com, model from GROQ_MODEL (default llama-3.3-70b-versatile).
+#      api.groq.com, model from GROQ_MODEL (default openai/gpt-oss-120b).
 #   2. Anthropic — ROZARK_AI_API_KEY or ANTHROPIC_API_KEY set (fallback).
 # Neither -> /agent/status reports configured=False and chat returns a
 # graceful 503; the rest of the platform keeps working.
@@ -256,7 +340,7 @@ def get_score(attempt_id: str):
 
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
-DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
+DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"
 DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-5"
 
 def _agent_provider(challenge=None):
@@ -616,7 +700,8 @@ def submit(attempt_id: str, body: SubmitRequest):
         functional=compute_functional_score(junit_xml=body.junit_xml, tap_output=body.tap_output, scorer_output=body.scorer_output, manual=body.manual_functional_score)
     collab, breakdown = compute_collaboration(att.events)
     total=round(ch.rubric_weights.functional*functional + ch.rubric_weights.ai_collaboration*collab,2)
-    report=Report(attempt_id=att.id, challenge_id=att.challenge_id, candidate_name=att.candidate_name, functional_score=functional, ai_collaboration_score=collab, total_score=total, breakdown=breakdown, timeline=list(att.events))
+    verdict, signals, concerns, metrics = compute_report_extras(list(att.events), att, total)
+    report=Report(attempt_id=att.id, challenge_id=att.challenge_id, candidate_name=att.candidate_name, functional_score=functional, ai_collaboration_score=collab, total_score=total, breakdown=breakdown, timeline=list(att.events), verdict=verdict, signals=signals, concerns=concerns, metrics=metrics)
     att.status="submitted"
     store.save_attempt(att)  # persist even if the session_submitted append is hard-stopped
     try:

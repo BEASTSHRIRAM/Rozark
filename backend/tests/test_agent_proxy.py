@@ -90,7 +90,7 @@ def test_groq_status_model_default_and_override(monkeypatch):
     monkeypatch.setenv("GROQ_API_KEY", "groq-test-key")
     s = client.get("/agent/status").json()
     assert s["configured"] is True and s["provider"] == "groq"
-    assert s["model"] == "llama-3.3-70b-versatile"
+    assert s["model"] == "openai/gpt-oss-120b"
     monkeypatch.setenv("GROQ_MODEL", "llama-3.1-8b-instant")
     assert client.get("/agent/status").json()["model"] == "llama-3.1-8b-instant"
 
@@ -108,13 +108,13 @@ def test_groq_chat_mocked_records_events_and_budget(monkeypatch):
     # Request shape: OpenAI-compatible chat completions, default model,
     # system + user messages.
     sent = _FakeGroqClient.last["json"]
-    assert sent["model"] == "llama-3.3-70b-versatile"
+    assert sent["model"] == "openai/gpt-oss-120b"
     assert [m["role"] for m in sent["messages"]] == ["system", "user"]
     assert sent["messages"][1]["content"] == "fix the pagination bug"
     events = client.get(f"/attempts/{aid}/events").json()
     assert [e["type"] for e in events] == ["prompt", "token_usage", "agent_response"]
     usage_event = events[1]
-    assert usage_event["payload"]["provider"] == "groq" and usage_event["payload"]["model"] == "llama-3.3-70b-versatile"
+    assert usage_event["payload"]["provider"] == "groq" and usage_event["payload"]["model"] == "openai/gpt-oss-120b"
 
 
 def test_groq_takes_precedence_over_anthropic(monkeypatch):
