@@ -4,14 +4,15 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import SandboxTerminal from "@/components/SandboxTerminal";
 import CodeEditor from "@/components/CodeEditor";
-import { ApiError, fetchAttempt, fetchBudget, fetchChallenge, fetchEvents, fetchSession, heartbeat, listFiles, readFile, runScore, startSandbox, submitAttempt, writeFile } from "@/lib/api";
-import type { Attempt, Challenge, SessionEvent, SessionStatus, TokenBudget, WorkspaceFile } from "@/lib/types";
+import AgentPanel from "@/components/AgentPanel";
+import { ApiError, fetchAttempt, fetchBudget, fetchChallenge, fetchSession, heartbeat, listFiles, readFile, runScore, startSandbox, submitAttempt, writeFile } from "@/lib/api";
+import type { Attempt, Challenge, SessionStatus, TokenBudget, WorkspaceFile } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
 // Attempt workspace — 3-pane layout, LIVE data.
 // Brief LEFT (real challenge) · Code MIDDLE (files API + Monaco editor,
-// terminal below is the live websocket PTY) · AI agent RIGHT (history from
-// the event log; composer scaffold in this slice, live in the next).
+// terminal below is the live websocket PTY) · AI agent RIGHT (live panel:
+// components/AgentPanel.tsx — history from the event log + live composer).
 // Header countdown comes from GET /attempts/{id}/session (polled 15s,
 // heartbeat POST every 30s); the budget bar from GET /attempts/{id}/budget
 // (polled 10s). Submit runs scoring (best-effort) then POST /submit.
@@ -72,8 +73,6 @@ export default function AttemptPage({ params }: { params: { id: string } }) {
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
 
-  const [history, setHistory] = useState<SessionEvent[]>([]);
-  const [mode, setMode] = useState<"plan" | "agent">("agent");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const openedDefaults = useRef(false);
@@ -116,18 +115,6 @@ export default function AttemptPage({ params }: { params: { id: string } }) {
     poll();
     const iv = setInterval(poll, 10000);
     return () => { alive = false; clearInterval(iv); };
-  }, [id]);
-
-  // --- agent history from the event log ------------------------------------
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const evts = await fetchEvents(id, { types: ["prompt", "agent_response", "tool_call"] });
-        if (alive) setHistory(evts);
-      } catch { /* history is best-effort */ }
-    })();
-    return () => { alive = false; };
   }, [id]);
 
   // --- workspace files -------------------------------------------------------
@@ -345,35 +332,8 @@ export default function AttemptPage({ params }: { params: { id: string } }) {
           </div>
         </section>
 
-        {/* RIGHT — AI agent panel (history live; composer scaffold this slice) */}
-        <section className="space-y-3 rounded border border-gray-700 p-4">
-          <div className="flex items-center justify-between">
-            <h2 className="font-semibold">AI Agent</h2>
-            <div className="flex rounded border border-gray-600 text-xs" role="group" aria-label="Agent mode">
-              {(["plan", "agent"] as const).map((m) => (
-                <button key={m} onClick={() => setMode(m)} className={`px-3 py-1 capitalize ${mode === m ? "bg-vermillion text-white" : "text-gray-400"}`}>{m}</button>
-              ))}
-            </div>
-          </div>
-          <p className="text-xs text-gray-500">Mode: <strong className="text-gray-300 capitalize">{mode}</strong> — history below is loaded from this attempt&apos;s recorded event log.</p>
-          <ul className="space-y-2">
-            {history.length === 0 && <li className="text-sm text-gray-500">No prompts recorded yet for this attempt.</li>}
-            {history.map((e) => {
-              const text = String(e.payload.text ?? e.payload.response_text ?? e.payload.tool ?? e.payload.name ?? "");
-              const phase = String(e.payload.phase ?? "");
-              return (
-                <li key={e.id} className="rounded border border-gray-800 bg-gray-900 p-2.5">
-                  <p className="text-[11px] text-gray-500">
-                    {phase && phaseColor[phase] ? <span className={`mr-1 inline-block h-2 w-2 rounded-sm ${phaseColor[phase]}`} /> : null}
-                    {e.type}{phase ? ` · ${phase}` : ""} · <span className="font-mono">{e.id}</span>
-                  </p>
-                  {text ? <p className="mt-1 whitespace-pre-wrap text-sm text-gray-200">{text}</p> : <pre className="mt-1 overflow-auto text-xs text-gray-400">{JSON.stringify(e.payload, null, 2)}</pre>}
-                </li>
-              );
-            })}
-          </ul>
-          <div className="rounded border border-dashed border-gray-700 p-3 text-sm text-gray-500">Prompt composer (scaffold) — the live composer ships in the next slice; prompts sent there are recorded as phase-tagged events.</div>
-        </section>
+        {/* RIGHT — AI agent panel (live: components/AgentPanel.tsx) */}
+        <AgentPanel attemptId={id} submitted={!!submitted} onBudget={setBudget} />
       </div>
 
       <div className="flex gap-4">

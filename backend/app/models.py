@@ -192,3 +192,17 @@ class Replay(BaseModel):
     events: list[SessionEvent]=Field(default_factory=list)
     git_snapshots: list[dict[str,Any]]=Field(default_factory=list)
     token_budget: Optional[TokenBudgetSummary]=None
+
+class AgentStatus(BaseModel):
+    configured: bool
+    provider: str="groq"
+    model: str
+class AgentChatRequest(BaseModel):
+    prompt: str
+    phase: str="building"
+    mode: str="agent"
+class AgentChatResponse(BaseModel):
+    response_text: str
+    tokens_in: int
+    tokens_out: int
+    budget: Optional[TokenBudgetSummary]=None
