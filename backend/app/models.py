@@ -250,3 +250,17 @@ class FileWriteRequest(BaseModel):
 class FileWriteResponse(BaseModel):
     path: str
     size: int
+
+class AgentStatus(BaseModel):
+    configured: bool
+    provider: str="anthropic"
+    model: str
+class AgentChatRequest(BaseModel):
+    prompt: str
+    phase: str="building"
+    mode: str="agent"
+class AgentChatResponse(BaseModel):
+    response_text: str
+    tokens_in: int
+    tokens_out: int
+    budget: Optional[TokenBudgetSummary]=None
