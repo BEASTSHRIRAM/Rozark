@@ -62,7 +62,7 @@ export default function CreateChallengePage() {
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold">Create Challenge — {STEPS[step]}</h1>
-      <ol className="flex flex-wrap gap-2 text-xs">{STEPS.map((s, i) => (<li key={s} className={`rounded px-2 py-1 ${i === step ? "bg-indigo-600" : "bg-gray-800"}`}>{i + 1}. {s}</li>))}</ol>
+      <ol className="flex flex-wrap gap-2 text-xs">{STEPS.map((s, i) => (<li key={s} className={`rounded px-2 py-1 ${i === step ? "bg-vermillion" : "bg-gray-800"}`}>{i + 1}. {s}</li>))}</ol>
       {step === 0 && (<div className="space-y-3"><label className="block text-sm">Stack / Environment<input className="mt-1 w-full rounded bg-gray-900 p-2" value={form.stack} onChange={(e) => set("stack", e.target.value)} /></label></div>)}
       {step === 1 && (<div className="space-y-3"><label className="block text-sm">Source (upload_zip &lt;=5MB / clone_github / sample)<select className="mt-1 w-full rounded bg-gray-900 p-2" value={form.source} onChange={(e) => set("source", e.target.value)}><option value="sample">Sample project</option><option value="clone_github">Clone from GitHub</option><option value="upload_zip">Upload Zip</option></select></label>{form.source === "clone_github" && (<input className="w-full rounded bg-gray-900 p-2" placeholder="https://github.com/org/repo" value={form.github_url} onChange={(e) => set("github_url", e.target.value)} />)}</div>)}
       {step === 2 && (<div className="space-y-3">{["install_command", "run_command", "test_command", "default_open_files"].map((k) => (<label key={k} className="block text-sm">{k}<input className="mt-1 w-full rounded bg-gray-900 p-2" value={String(form[k as keyof typeof form])} onChange={(e) => set(k, e.target.value)} /></label>))}<p className="text-xs text-gray-400">Also configure read-only files and hidden files in the API payload (see docs/CHALLENGE_SCHEMA.md).</p></div>)}
@@ -71,11 +71,11 @@ export default function CreateChallengePage() {
       {step === 5 && (<div className="space-y-3"><label className="block text-sm">Allowed agents (comma separated)<input className="mt-1 w-full rounded bg-gray-900 p-2" value={form.allowed_agents} onChange={(e) => set("allowed_agents", e.target.value)} /></label><label className="block text-sm">Token budget<input type="number" className="mt-1 w-full rounded bg-gray-900 p-2" value={form.token_budget} onChange={(e) => set("token_budget", Number(e.target.value))} /></label><label className="flex gap-2 text-sm"><input type="checkbox" checked={form.internet_enabled} onChange={(e) => set("internet_enabled", e.target.checked)} /> Internet enabled</label></div>)}
       <div className="flex gap-3">
         <button disabled={step === 0} className="rounded border border-gray-600 px-4 py-2 disabled:opacity-40" onClick={() => setStep(step - 1)}>Back</button>
-        {step < STEPS.length - 1 ? (<button className="rounded-full bg-indigo-600 px-5 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500" onClick={() => setStep(step + 1)}>Next</button>) : (<button disabled={saveState === "saving" || !form.title.trim()} className="rounded-full bg-indigo-600 px-5 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:opacity-50" onClick={save}>{saveState === "saving" ? "Saving…" : "Validate & Save"}</button>)}
+        {step < STEPS.length - 1 ? (<button className="rounded-full bg-vermillion px-5 py-2 text-sm font-semibold text-white transition hover:bg-vermilliondeep" onClick={() => setStep(step + 1)}>Next</button>) : (<button disabled={saveState === "saving" || !form.title.trim()} className="rounded-full bg-vermillion px-5 py-2 text-sm font-semibold text-white transition hover:bg-vermilliondeep disabled:opacity-50" onClick={save}>{saveState === "saving" ? "Saving…" : "Validate & Save"}</button>)}
       </div>
       {saveState === "saved" && (
         <p className="rounded-lg border border-white/10 bg-white/[0.03] px-3.5 py-3 text-sm text-gray-200">
-          ✓ {saveMsg} <Link href="/challenges" className="font-medium text-indigo-300 hover:underline">View in challenge library →</Link>
+          ✓ {saveMsg} <Link href="/challenges" className="font-medium text-cobaltlt hover:underline">View in challenge library →</Link>
           <span className="ml-2 font-mono text-xs text-gray-500">{savedId}</span>
         </p>
       )}

@@ -18,7 +18,7 @@ export default async function DashboardPage() {
         <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
           <p className="text-sm text-gray-400">Challenges</p>
           <p className="mt-1 text-3xl font-bold text-white">{challenges.length}</p>
-          <Link href="/challenges" className="mt-2 inline-block text-sm text-indigo-300 hover:underline">Browse challenges →</Link>
+          <Link href="/challenges" className="mt-2 inline-block text-sm text-cobaltlt hover:underline">Browse challenges →</Link>
         </div>
         <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
           <p className="text-sm text-gray-400">Dual scoring</p>
@@ -28,7 +28,7 @@ export default async function DashboardPage() {
         <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
           <p className="text-sm text-gray-400">New assessment</p>
           <p className="mt-1 text-lg font-semibold text-white">HackerRank-style projects, AI-native</p>
-          <Link href="/challenges/new" className="mt-2 inline-block rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500">Create a challenge</Link>
+          <Link href="/challenges/new" className="mt-2 inline-block rounded-lg bg-vermillion px-4 py-2 text-sm font-semibold text-white hover:bg-vermilliondeep">Create a challenge</Link>
         </div>
       </section>
 
@@ -39,7 +39,7 @@ export default async function DashboardPage() {
             <h3 className="font-semibold text-white">{c.title}</h3>
             <p className="text-sm text-gray-400">{c.type} · {c.difficulty} · {c.score} pts · {c.recommended_time_minutes} min</p>
             <p className="mt-2 text-sm text-gray-300">{c.problem_description}</p>
-            <Link className="mt-2 inline-block text-sm text-indigo-300 hover:underline" href={`/attempts/${c.id}`}>Open attempt view →</Link>
+            <Link className="mt-2 inline-block text-sm text-cobaltlt hover:underline" href={`/attempts/${c.id}`}>Open attempt view →</Link>
           </article>
         ))}
       </section>
