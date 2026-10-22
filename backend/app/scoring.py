@@ -1,6 +1,6 @@
 from __future__ import annotations
 import re, xml.etree.ElementTree as ET
-from .models import DimensionScore, SessionEvent, EventType
+from .models import DimensionScore, ReportMetrics, ReportSignal, SessionEvent, EventType
 
 def _safe_count(value) -> int:
     """Parse a JUnit count attribute; anything unparseable/negative is 0."""
@@ -98,3 +98,58 @@ def compute_collaboration(events: list[SessionEvent]) -> tuple[float, list[Dimen
     weights={"prompting":0.25,"exploration":0.20,"verification_testing":0.20,"debugging":0.15,"independence":0.20}
     total=round(sum(d.score*weights[d.dimension] for d in dims),2)
     return total, dims
+
+
+def _parse_ts(v: str):
+    from datetime import datetime
+    if not v: return None
+    try: return datetime.fromisoformat(v.replace("Z", "+00:00"))
+    except ValueError: return None
+
+def compute_report_extras(events: list[SessionEvent], attempt, total: float):
+    """Verdict + evidence-linked signals/concerns + metrics (B8).
+
+    Every signal/concern carries the event ids that back it, so a human
+    reviewer can jump straight from a claim to the recorded evidence.
+    """
+    if total >= 70: verdict = "Strong hire signal"
+    elif total >= 50: verdict = "Hire signal"
+    elif total >= 35: verdict = "Mixed signals"
+    else: verdict = "Weak signal"
+    _collab, dims = compute_collaboration(events)
+    signals: list[ReportSignal] = []
+    concerns: list[ReportSignal] = []
+    for d in dims:
+        if d.score >= 70:
+            signals.append(ReportSignal(text=f"Strong {d.dimension.replace('_', ' ')} ({d.score:.0f}/100)", evidence_event_ids=list(d.evidence_event_ids)))
+        elif d.score <= 40:
+            concerns.append(ReportSignal(text=f"Weak {d.dimension.replace('_', ' ')} ({d.score:.0f}/100)", evidence_event_ids=list(d.evidence_event_ids)))
+    budget_hits = _ev(events, EventType.budget_exceeded)
+    if budget_hits:
+        concerns.append(ReportSignal(text="Hit the token budget cap", evidence_event_ids=[e.id for e in budget_hits]))
+    tests = _ev(events, EventType.test_run)
+    if not tests:
+        concerns.append(ReportSignal(text="Never ran tests", evidence_event_ids=[]))
+    elif len(tests) >= 3:
+        signals.append(ReportSignal(text=f"Ran tests {len(tests)} times", evidence_event_ids=[e.id for e in tests]))
+    prompts = _ev(events, EventType.prompt)
+    by_phase: dict[str, int] = {}
+    for e in prompts:
+        ph = str(e.payload.get("phase", "building"))
+        by_phase[ph] = by_phase.get(ph, 0) + 1
+    edits = _ev(events, EventType.file_edit)
+    stamps = [t for t in (_parse_ts(e.ts) for e in events) if t is not None]
+    duration = int((max(stamps) - min(stamps)).total_seconds()) if len(stamps) >= 2 else 0
+    ttf = None
+    if edits and stamps:
+        first_edit = _parse_ts(edits[0].ts)
+        if first_edit is not None:
+            ttf = max(0, int((first_edit - min(stamps)).total_seconds()))
+    metrics = ReportMetrics(
+        prompts_total=len(prompts), prompts_by_phase=by_phase,
+        tokens_used=int(getattr(attempt, "tokens_used", 0) or 0),
+        token_budget=int(getattr(attempt, "token_budget", 0) or 0),
+        test_runs=len(tests), files_edited=len(edits),
+        git_snapshots=len(_ev(events, EventType.git_snapshot)),
+        duration_seconds=duration, time_to_first_edit_seconds=ttf)
+    return verdict, signals, concerns, metrics

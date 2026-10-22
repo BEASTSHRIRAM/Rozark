@@ -137,6 +137,19 @@ class DimensionScore(BaseModel):
     score: float
     evidence_event_ids: list[str]=Field(default_factory=list)
     notes: str=""
+class ReportSignal(BaseModel):
+    text: str
+    evidence_event_ids: list[str]=Field(default_factory=list)
+class ReportMetrics(BaseModel):
+    prompts_total: int=0
+    prompts_by_phase: dict[str,int]=Field(default_factory=dict)
+    tokens_used: int=0
+    token_budget: int=0
+    test_runs: int=0
+    files_edited: int=0
+    git_snapshots: int=0
+    duration_seconds: int=0
+    time_to_first_edit_seconds: Optional[int]=None
 class Report(BaseModel):
     attempt_id: str
     challenge_id: str
@@ -146,6 +159,10 @@ class Report(BaseModel):
     total_score: float
     breakdown: list[DimensionScore]=Field(default_factory=list)
     timeline: list[SessionEvent]=Field(default_factory=list)
+    verdict: str=""
+    signals: list[ReportSignal]=Field(default_factory=list)
+    concerns: list[ReportSignal]=Field(default_factory=list)
+    metrics: Optional[ReportMetrics]=None
 class TokenBudgetSummary(BaseModel):
     budget: int
     used: int

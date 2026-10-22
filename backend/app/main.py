@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .models import *
 from .store import store
 from .seed import seed
-from .scoring import compute_functional_score, compute_collaboration, parse_fs_score, parse_junit_xml, parse_tap
+from .scoring import compute_functional_score, compute_collaboration, compute_report_extras, parse_fs_score, parse_junit_xml, parse_tap
 from .recorder import recorder, BudgetHardStop
 from .auth import hash_password, verify_password, create_token, current_user_id
 from .sandbox import sandbox_manager, SandboxUnavailable, TerminalInputTap, TerminalOutputTap, workspace_path_for
@@ -645,7 +645,8 @@ def submit(attempt_id: str, body: SubmitRequest):
         functional=compute_functional_score(junit_xml=body.junit_xml, tap_output=body.tap_output, scorer_output=body.scorer_output, manual=body.manual_functional_score)
     collab, breakdown = compute_collaboration(att.events)
     total=round(ch.rubric_weights.functional*functional + ch.rubric_weights.ai_collaboration*collab,2)
-    report=Report(attempt_id=att.id, challenge_id=att.challenge_id, candidate_name=att.candidate_name, functional_score=functional, ai_collaboration_score=collab, total_score=total, breakdown=breakdown, timeline=list(att.events))
+    verdict, signals, concerns, metrics = compute_report_extras(list(att.events), att, total)
+    report=Report(attempt_id=att.id, challenge_id=att.challenge_id, candidate_name=att.candidate_name, functional_score=functional, ai_collaboration_score=collab, total_score=total, breakdown=breakdown, timeline=list(att.events), verdict=verdict, signals=signals, concerns=concerns, metrics=metrics)
     att.status="submitted"
     store.save_attempt(att)  # persist even if the session_submitted append is hard-stopped
     try:
