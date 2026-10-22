@@ -66,6 +66,7 @@ export default function LobbyPage({ params }: { params: { id: string } }) {
 
   const timeLimit = session?.time_limit_minutes ?? challenge?.agent_config.time_limit_minutes ?? challenge?.recommended_time_minutes ?? attempt.time_limit_minutes;
   const budget = session?.budget.budget ?? attempt.token_budget ?? challenge?.agent_config.token_budget;
+  const agentMode = challenge?.agent_config?.agent_mode === "agent" ? "agent" : "mentor";
 
   return (
     <div className="mx-auto max-w-2xl space-y-5">
@@ -86,7 +87,11 @@ export default function LobbyPage({ params }: { params: { id: string } }) {
         <h2 className="font-semibold">Before you start</h2>
         <ul className="mt-2 space-y-2 text-sm text-gray-300">
           <li><strong className="text-gray-100">Work independently.</strong> Your terminal commands, file edits, prompts and test runs are recorded as one session log and reviewed as evidence.</li>
-          <li><strong className="text-gray-100">The built-in mentor can explain what&apos;s wrong and point you at what to check; it will never write or fix code for you.</strong> Everything you ask it is recorded.</li>
+          {agentMode === "agent" ? (
+            <li><strong className="text-gray-100">This challenge enables a full AI agent.</strong> It can edit files and run commands in your workspace to help you — and everything it does is recorded and shown in your report, attributed to the agent rather than to you.</li>
+          ) : (
+            <li><strong className="text-gray-100">The built-in mentor can explain what&apos;s wrong and point you at what to check; it will never write or fix code for you.</strong> Everything you ask it is recorded.</li>
+          )}
           <li><strong className="text-gray-100">Read-only and hidden files stay locked.</strong> Editing them is disabled, and the hidden test suite runs only at submit — public tests show their names and expected-vs-received results as you go.</li>
         </ul>
       </section>
@@ -95,9 +100,9 @@ export default function LobbyPage({ params }: { params: { id: string } }) {
         <h2 className="font-semibold">The details</h2>
         <ul className="mt-2 list-disc space-y-1.5 pl-5 text-sm text-gray-300">
           {timeLimit ? <li>Time limit: <strong>{timeLimit} minutes</strong> — the countdown starts with your session and the workspace freezes at submit or expiry.</li> : null}
-          {budget ? <li>Mentor token budget: <strong>{budget.toLocaleString()} tokens</strong>, tracked per phase (planning / building / debugging). A hard stop may apply when the budget is exhausted.</li> : null}
+          {budget ? <li>{agentMode === "agent" ? "AI agent" : "Mentor"} token budget: <strong>{budget.toLocaleString()} tokens</strong>, tracked per phase (planning / building / debugging). A hard stop may apply when the budget is exhausted.</li> : null}
           {challenge?.ide_setup.read_only_files.length ? <li>Read-only files (cannot be edited): <span className="font-mono text-xs">{challenge.ide_setup.read_only_files.join(", ")}</span></li> : null}
-          <li>You may use the built-in mentor panel, the public tests checklist and the live terminal. Paste events are logged — just work the way you normally would.</li>
+          <li>You may use the built-in {agentMode === "agent" ? "AI agent" : "mentor"} panel, the public tests checklist and the live terminal. Paste events are logged — just work the way you normally would.</li>
         </ul>
       </section>
 

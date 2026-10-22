@@ -5,6 +5,7 @@ import select
 import subprocess
 import threading
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, HTTPException, Header, Response, WebSocket, WebSocketDisconnect
@@ -15,6 +16,7 @@ from .store import store
 from .seed import seed
 from .scoring import compute_functional_score, compute_collaboration, compute_report_extras, parse_fs_score, parse_junit_xml, parse_tap, parse_junit_cases, parse_tap_cases
 from .mentor import run_mentor
+from .agent import run_agent, TOOL_SCHEMAS
 from .recorder import recorder, BudgetHardStop
 from .auth import hash_password, verify_password, create_token, current_user_id
 from .sandbox import sandbox_manager, SandboxUnavailable, TerminalInputTap, TerminalOutputTap, workspace_path_for
@@ -331,8 +333,9 @@ def get_score(attempt_id: str):
 # API. The key never reaches the browser/sandbox; every call is recorded
 # (prompt -> token_usage -> agent_response) and the recorder's hard stop
 # refuses agent activity once the token cap is hit. What sits behind it
-# is now the LangGraph MENTOR graph (app/mentor.py) — diagnose-only,
-# read-only context, guardrailed replies; see agent_chat below.
+# is chosen by the challenge's recruiter-set agent_config.agent_mode:
+# the LangGraph MENTOR graph (app/mentor.py, diagnose-only) or the
+# LangGraph AGENT graph (app/agent.py, guarded tools) — see agent_chat.
 #
 # Provider selection (first configured wins):
 #   1. Groq — GROQ_API_KEY set: OpenAI-compatible chat completions at
@@ -410,6 +413,130 @@ def _call_anthropic(key, model, system_prompt, prompt, max_tokens=1024):
     usage = data.get("usage", {}) or {}
     return text, _usage_int(usage.get("input_tokens")), _usage_int(usage.get("output_tokens"))
 
+def _agent_mode_of(ch) -> str:
+    """The attempt's effective side-panel mode: the CHALLENGE's
+    recruiter-set agent_config.agent_mode, defaulting to "mentor".
+    This is the only source of the mode — request payloads never are."""
+    if ch is None:
+        return "mentor"
+    m = ch.agent_config.agent_mode
+    v = m.value if isinstance(m, AgentMode) else str(m or "mentor")
+    return v if v in ("mentor", "agent") else "mentor"
+
+# ---------------------------------------------------------------------------
+# Tool-calling providers for AGENT mode (app/agent.py). The graph speaks
+# a normalised conversation shape; the two functions below convert
+# to/from each provider's wire format:
+#   message: {"role": "system"|"user", "content": str}
+#          | {"role": "assistant", "content": str,
+#             "tool_calls": [{"id", "name", "arguments": dict}]}
+#          | {"role": "tool", "tool_call_id": str, "name": str,
+#             "content": str}
+# Both configured providers support tool calling (Groq via its
+# OpenAI-compatible functions format, Anthropic via tool_use blocks);
+# usage from EVERY call is returned for budget metering by the caller.
+# ---------------------------------------------------------------------------
+
+def _parse_tool_arguments(raw) -> dict:
+    if isinstance(raw, dict):
+        return raw
+    try:
+        parsed = json.loads(raw or "{}")
+        return parsed if isinstance(parsed, dict) else {}
+    except (ValueError, TypeError):
+        return {}
+
+def _call_groq_tools(key, model, messages, tools, offer_tools, max_tokens=2048):
+    wire = []
+    for m in messages:
+        role = m.get("role")
+        if role in ("system", "user"):
+            wire.append({"role": role, "content": str(m.get("content") or "")})
+        elif role == "assistant":
+            entry = {"role": "assistant", "content": str(m.get("content") or "")}
+            calls = []
+            for i, tc in enumerate(m.get("tool_calls") or []):
+                calls.append({"id": str(tc.get("id") or f"call_{i}"), "type": "function",
+                              "function": {"name": str(tc.get("name") or ""),
+                                           "arguments": json.dumps(tc.get("arguments") or {})}})
+            if calls:
+                entry["tool_calls"] = calls
+            wire.append(entry)
+        elif role == "tool":
+            wire.append({"role": "tool", "tool_call_id": str(m.get("tool_call_id") or ""),
+                         "content": str(m.get("content") or "")})
+    payload = {"model": model, "max_tokens": max_tokens, "messages": wire}
+    if offer_tools and tools:
+        payload["tools"] = [{"type": "function",
+                             "function": {"name": t["name"], "description": t["description"],
+                                          "parameters": t["parameters"]}} for t in tools]
+        payload["tool_choice"] = "auto"
+    resp = _provider_post(GROQ_API_URL,
+                          {"Authorization": f"Bearer {key}", "content-type": "application/json"},
+                          payload)
+    data = _provider_json(resp)
+    choices = data.get("choices") or []
+    msg = (choices[0].get("message") or {}) if choices and isinstance(choices[0], dict) else {}
+    calls = []
+    for i, tc in enumerate(msg.get("tool_calls") or []):
+        fn = tc.get("function") or {}
+        calls.append({"id": str(tc.get("id") or f"call_{i}"), "name": str(fn.get("name") or ""),
+                      "arguments": _parse_tool_arguments(fn.get("arguments"))})
+    usage = data.get("usage", {}) or {}
+    return {"content": str(msg.get("content") or ""), "tool_calls": calls,
+            "tokens_in": _usage_int(usage.get("prompt_tokens")),
+            "tokens_out": _usage_int(usage.get("completion_tokens"))}
+
+def _call_anthropic_tools(key, model, messages, tools, offer_tools, max_tokens=2048):
+    system = "\n\n".join(str(m.get("content") or "") for m in messages if m.get("role") == "system")
+    wire = []
+    for m in messages:
+        role = m.get("role")
+        if role == "system":
+            continue
+        if role == "user":
+            wire.append({"role": "user", "content": str(m.get("content") or "")})
+        elif role == "assistant":
+            blocks = []
+            if m.get("content"):
+                blocks.append({"type": "text", "text": str(m["content"])})
+            for tc in m.get("tool_calls") or []:
+                blocks.append({"type": "tool_use", "id": str(tc.get("id") or ""),
+                               "name": str(tc.get("name") or ""),
+                               "input": tc.get("arguments") or {}})
+            wire.append({"role": "assistant", "content": blocks or [{"type": "text", "text": ""}]})
+        elif role == "tool":
+            block = {"type": "tool_result", "tool_use_id": str(m.get("tool_call_id") or ""),
+                     "content": str(m.get("content") or "")}
+            if wire and wire[-1]["role"] == "user" and isinstance(wire[-1]["content"], list):
+                wire[-1]["content"].append(block)
+            else:
+                wire.append({"role": "user", "content": [block]})
+    payload = {"model": model, "max_tokens": max_tokens, "messages": wire}
+    if system:
+        payload["system"] = system
+    if offer_tools and tools:
+        payload["tools"] = [{"name": t["name"], "description": t["description"],
+                             "input_schema": t["parameters"]} for t in tools]
+    resp = _provider_post(ANTHROPIC_API_URL,
+                          {"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+                          payload)
+    data = _provider_json(resp)
+    text_parts = []
+    calls = []
+    for b in data.get("content", []) or []:
+        if not isinstance(b, dict):
+            continue
+        if b.get("type") == "text":
+            text_parts.append(str(b.get("text", "")))
+        elif b.get("type") == "tool_use":
+            calls.append({"id": str(b.get("id") or ""), "name": str(b.get("name") or ""),
+                          "arguments": b.get("input") if isinstance(b.get("input"), dict) else {}})
+    usage = data.get("usage", {}) or {}
+    return {"content": "".join(text_parts), "tool_calls": calls,
+            "tokens_in": _usage_int(usage.get("input_tokens")),
+            "tokens_out": _usage_int(usage.get("output_tokens"))}
+
 @app.get("/agent/status", response_model=AgentStatus)
 def agent_status():
     provider, key, model = _agent_provider()
@@ -460,10 +587,207 @@ def public_tests(attempt_id: str):
     return _public_tests_for(att)
 
 # ---------------------------------------------------------------------------
-# Mentor chat: the LangGraph mentor graph (app/mentor.py) behind the
-# existing chat contract. Plan/Agent modes are gone — the panel is a
-# mentor: it diagnoses (SYMPTOM / WHERE / HINT), never solves, and has no
-# file-write or command capability. Context gathering below is READ-ONLY.
+# Agent-mode tool layer: the ONLY hands the full agent has. Every guard
+# the files API enforces is enforced again here, in the tool layer
+# itself — workspace scoping via _safe_ws_path, hidden files refused,
+# read-only files refused, and submitted/expired attempts refuse all
+# mutations and commands. Refusals return text for the model (they
+# never raise). Every call is recorded as a tool_call session event
+# with actor "agent"; file mutations additionally emit the recorder's
+# file_edit shape, also actor "agent", so report/replay distinguish AI
+# actions from candidate actions.
+# ---------------------------------------------------------------------------
+
+class _ToolRefusal(Exception):
+    """A guard refusal — its message is the reason fed back to the model."""
+
+def _make_agent_tools(att: Attempt, ch, phase: str):
+    """Return (execute_tool, tool_events) for one agent-mode chat turn."""
+    tool_events: list[SessionEvent] = []
+    ws = workspace_path_for(att.id)
+
+    def _frozen_reason() -> str | None:
+        if att.status == "submitted":
+            return "the attempt is submitted and its workspace is frozen"
+        exp = _parse_iso(att.expires_at)
+        if att.status == "in_progress" and exp is not None and datetime.now(timezone.utc) > exp:
+            return "the attempt has expired and its workspace is frozen"
+        return None
+
+    def _resolve(raw) -> tuple[Path, str]:
+        try:
+            target = _safe_ws_path(ws, str(raw or ""))
+        except HTTPException as e:
+            raise _ToolRefusal(str(e.detail))
+        return target, target.relative_to(ws.resolve()).as_posix()
+
+    def _record(name: str, args: dict, summary: str, result_text: str, ok: bool,
+                file_event: SessionEventCreate | None = None):
+        args_summary = {k: str(v)[:200] for k, v in (args or {}).items()
+                        if k in ("path", "command")}
+        payload = {"tool": name, "via": "agent_graph", "phase": phase,
+                   "args": args_summary, "summary": summary,
+                   "result": result_text[:300], "ok": ok}
+        try:
+            ev = recorder.append(att, SessionEventCreate(
+                type=EventType.tool_call, actor=Actor.agent, payload=payload))
+            tool_events.append(ev)
+        except BudgetHardStop:
+            pass
+        if file_event is not None:
+            try:
+                recorder.append(att, file_event)
+            except BudgetHardStop:
+                pass
+
+    def _list_files(args):
+        lines = []
+        for path in sorted(ws.rglob("*")):
+            rel = path.relative_to(ws).as_posix()
+            parts = set(path.relative_to(ws).parts)
+            if ".git" in parts or "__pycache__" in parts or path.is_dir():
+                continue
+            ro, hid = _file_flags(att, rel)
+            if hid:
+                continue  # hidden files are never listed to the agent
+            lines.append(f"{rel} ({path.stat().st_size} bytes)" + (" [read-only]" if ro else ""))
+            if len(lines) >= 200:
+                lines.append("… (listing truncated at 200 files)")
+                break
+        return ("\n".join(lines) if lines else "(workspace is empty)"), \
+            f"listed {min(len(lines), 200)} workspace files", True, None
+
+    def _read_file(args):
+        target, rel = _resolve(args.get("path"))
+        _ro, hid = _file_flags(att, rel)
+        if hid:
+            raise _ToolRefusal(f"{rel} is a hidden file and cannot be read")
+        if not target.is_file():
+            return f"Error: {rel} does not exist in the workspace.", f"read {rel} — not found", False, None
+        try:
+            content = target.read_text(encoding="utf-8", errors="replace")
+        except OSError as e:
+            return f"Error: could not read {rel}: {e}", f"read {rel} — error", False, None
+        if len(content) > 8000:
+            content = content[:8000] + "\n…[truncated at 8000 chars]"
+        return content, f"read {rel}", True, None
+
+    def _write_file(args):
+        if (reason := _frozen_reason()):
+            raise _ToolRefusal(reason)
+        target, rel = _resolve(args.get("path"))
+        ro, hid = _file_flags(att, rel)
+        if hid:
+            raise _ToolRefusal(f"{rel} is a hidden file and cannot be written")
+        if ro:
+            raise _ToolRefusal(f"{rel} is read-only and cannot be written")
+        content = args.get("content")
+        if not isinstance(content, str):
+            return "Error: write_file requires a string 'content'.", f"write {rel} — error", False, None
+        existed = target.is_file()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+        fev = SessionEventCreate(type=EventType.file_edit, actor=Actor.agent,
+                                 payload={"path": rel,
+                                          "change": "modified" if existed else "created",
+                                          "source": "agent_tool"})
+        verb = "edited" if existed else "created"
+        return f"Wrote {rel} ({len(content)} chars).", f"{verb} {rel}", True, fev
+
+    def _edit_file(args):
+        if (reason := _frozen_reason()):
+            raise _ToolRefusal(reason)
+        target, rel = _resolve(args.get("path"))
+        ro, hid = _file_flags(att, rel)
+        if hid:
+            raise _ToolRefusal(f"{rel} is a hidden file and cannot be edited")
+        if ro:
+            raise _ToolRefusal(f"{rel} is read-only and cannot be edited")
+        if not target.is_file():
+            return f"Error: {rel} does not exist in the workspace.", f"edited {rel} — not found", False, None
+        old, new = args.get("old_text"), args.get("new_text")
+        if not isinstance(old, str) or not isinstance(new, str) or not old:
+            return "Error: edit_file requires non-empty string 'old_text' and string 'new_text'.", \
+                f"edited {rel} — error", False, None
+        text = target.read_text(encoding="utf-8", errors="replace")
+        count = text.count(old)
+        if count == 0:
+            return f"Error: old_text was not found in {rel}; no change made.", \
+                f"edited {rel} — no match", False, None
+        if count > 1:
+            return (f"Error: old_text occurs {count} times in {rel}; include more "
+                    f"context so it matches exactly once. No change made."), \
+                f"edited {rel} — ambiguous", False, None
+        target.write_text(text.replace(old, new, 1), encoding="utf-8")
+        fev = SessionEventCreate(type=EventType.file_edit, actor=Actor.agent,
+                                 payload={"path": rel, "change": "modified",
+                                          "source": "agent_tool"})
+        return f"Edited {rel}: replaced the matched text.", f"edited {rel}", True, fev
+
+    def _run_command(args):
+        if (reason := _frozen_reason()):
+            raise _ToolRefusal(reason)
+        cmd = str(args.get("command") or "").strip()
+        if not cmd:
+            return "Error: run_command requires a non-empty 'command'.", "ran: (empty)", False, None
+        try:
+            timeout = int(os.environ.get("ROZARK_AGENT_CMD_TIMEOUT") or 30)
+        except ValueError:
+            timeout = 30
+        exit_code = None
+        try:
+            proc = subprocess.run(cmd, shell=True, cwd=str(ws), capture_output=True,
+                                  text=True, timeout=timeout)
+            out = (proc.stdout or "") + (proc.stderr or "")
+            exit_code = proc.returncode
+        except subprocess.TimeoutExpired as e:
+            raw = e.output or ""
+            out = raw.decode(errors="replace") if isinstance(raw, bytes) else str(raw)
+            out += f"\n[command timed out after {timeout}s and was killed]"
+        if len(out) > 4000:
+            out = out[:2000] + "\n…[output truncated]…\n" + out[-1000:]
+        result = f"exit code: {exit_code}\n{out}".strip() if out.strip() else \
+            f"exit code: {exit_code} (no output)"
+        return result, f"ran: {cmd[:80]}", True, None
+
+    _HANDLERS = {"list_files": _list_files, "read_file": _read_file,
+                 "write_file": _write_file, "edit_file": _edit_file,
+                 "run_command": _run_command}
+
+    def execute_tool(name: str, args: dict) -> str:
+        args = args if isinstance(args, dict) else {}
+        handler = _HANDLERS.get(name)
+        if handler is None:
+            text = f"Error: unknown tool '{name}'."
+            _record(name, args, f"{name} — unknown tool", text, False)
+            return text
+        if not ws.is_dir():
+            text = "Refused: the sandbox workspace is not started yet."
+            _record(name, args, f"{name} refused: workspace not started", text, False)
+            return text
+        if att.budget_hard_stop and name in ("write_file", "edit_file", "run_command"):
+            # Defence in depth (the graph also stops): once the token
+            # hard stop is active, no mutation or command may run —
+            # its tool_call event could no longer be recorded.
+            text = "Refused: the token budget hard stop is active for this attempt."
+            _record(name, args, f"{name} refused: budget hard stop", text, False)
+            return text
+        try:
+            text, summary, ok, fev = handler(args)
+        except _ToolRefusal as r:
+            text, summary, ok, fev = f"Refused: {r}", f"{name} refused: {r}"[:200], False, None
+        except Exception as e:
+            text, summary, ok, fev = f"Error: tool failed: {e}", f"{name} — error", False, None
+        _record(name, args, summary, text, ok, fev)
+        return text
+
+    return execute_tool, tool_events
+
+# ---------------------------------------------------------------------------
+# Mentor context: what the mentor graph reads (READ-ONLY). In mentor
+# mode the panel diagnoses (SYMPTOM / WHERE / HINT), never solves, and
+# has no file-write or command capability. Context gathering below is
+# READ-ONLY.
 # ---------------------------------------------------------------------------
 
 def _mentor_context(att: Attempt, ch) -> dict:
@@ -517,6 +841,58 @@ def _mentor_context(att: Attempt, ch) -> dict:
         ctx["tests"] = "\n".join(tlines)
     return ctx
 
+# ---------------------------------------------------------------------------
+# Side-panel chat: ONE endpoint, TWO graphs, chosen by the CHALLENGE —
+# never by the request. agent_config.agent_mode == "mentor" (default)
+# routes to the LangGraph mentor (diagnose-only, read-only context,
+# guardrailed). "agent" routes to the LangGraph full agent
+# (app/agent.py), which may edit files and run commands through the
+# guarded tool layer above. A mode claimed in the request payload is
+# ignored entirely.
+# ---------------------------------------------------------------------------
+
+def _agent_chat_agent(att: Attempt, ch, body: AgentChatRequest,
+                      provider: str, key: str, model: str) -> AgentChatResponse:
+    """Full-agent turn: run the LangGraph agent loop with metering."""
+    execute_tool, tool_events = _make_agent_tools(att, ch, body.phase)
+
+    def _call_llm_tools(messages, offer_tools):
+        if provider == "groq":
+            out = _call_groq_tools(key, model, messages, TOOL_SCHEMAS, offer_tools)
+        else:
+            out = _call_anthropic_tools(key, model, messages, TOOL_SCHEMAS, offer_tools)
+        # Meter EVERY provider call into the same budget the mentor uses;
+        # the recorder flips the hard stop the moment the cap is crossed
+        # (token_usage appends themselves never raise).
+        recorder.append(att, SessionEventCreate(
+            type=EventType.token_usage, actor=Actor.system,
+            payload={"tokens_in": out["tokens_in"], "tokens_out": out["tokens_out"],
+                     "phase": body.phase, "via": "agent_graph",
+                     "provider": provider, "model": model}))
+        return out
+
+    result = run_agent(
+        call_llm_tools=_call_llm_tools, execute_tool=execute_tool,
+        budget_exceeded=lambda: att.budget_hard_stop,
+        prompt=body.prompt, phase=body.phase,
+        challenge_title=ch.title if ch else att.challenge_id,
+        brief=(ch.problem_description or "")[:800] if ch else "")
+    text = str(result.get("final_text") or "")
+    try:
+        recorder.append(att, SessionEventCreate(
+            type=EventType.agent_response, actor=Actor.agent,
+            payload={"text": text, "phase": body.phase, "via": "agent_graph",
+                     "mode": "agent", "tool_calls": len(tool_events),
+                     "stopped": result.get("stopped") or "done"}))
+    except BudgetHardStop:
+        pass  # the turn's work is recorded; the reply still returns
+    return AgentChatResponse(
+        response_text=text,
+        tokens_in=int(result.get("tokens_in") or 0),
+        tokens_out=int(result.get("tokens_out") or 0),
+        budget=recorder.budget_summary(att), agent_mode="agent",
+        tool_events=tool_events)
+
 @app.post("/attempts/{attempt_id}/agent/chat", response_model=AgentChatResponse)
 def agent_chat(attempt_id: str, body: AgentChatRequest):
     att = store.attempts.get(attempt_id)
@@ -525,13 +901,18 @@ def agent_chat(attempt_id: str, body: AgentChatRequest):
     if att.budget_hard_stop:
         raise HTTPException(403, f"Token budget hard stop is active for attempt {att.id} ({att.tokens_used}/{att.token_budget} tokens used).")
     ch = store.challenges.get(att.challenge_id)
+    # The mode comes from the challenge's recruiter-set config ONLY.
+    mode = _agent_mode_of(ch)
     provider, key, model = _agent_provider(ch)
     if not key:
-        return JSONResponse(status_code=503, content={"detail": "Mentor is not configured: set GROQ_API_KEY (or ANTHROPIC_API_KEY) on the backend.", "code": "agent_not_configured"})
+        label = "AI agent" if mode == "agent" else "Mentor"
+        return JSONResponse(status_code=503, content={"detail": f"{label} is not configured: set GROQ_API_KEY (or ANTHROPIC_API_KEY) on the backend.", "code": "agent_not_configured"})
     try:
-        recorder.append(att, SessionEventCreate(type=EventType.prompt, actor=Actor.candidate, payload={"text": body.prompt, "phase": body.phase, "mode": "mentor", "via": "mentor_graph"}))
+        recorder.append(att, SessionEventCreate(type=EventType.prompt, actor=Actor.candidate, payload={"text": body.prompt, "phase": body.phase, "mode": mode, "via": "agent_graph" if mode == "agent" else "mentor_graph"}))
     except BudgetHardStop as e:
         raise HTTPException(403, str(e))
+    if mode == "agent":
+        return _agent_chat_agent(att, ch, body, provider, key, model)
 
     def _call_llm(system_prompt: str, user_prompt: str):
         if provider == "groq":
@@ -681,7 +1062,8 @@ def _session_status(att: Attempt) -> SessionStatus:
         attempt_id=att.id, status=att.status, started_at=att.started_at,
         expires_at=att.expires_at, elapsed_seconds=max(0, elapsed),
         remaining_seconds=max(0, remaining), time_limit_minutes=att.time_limit_minutes,
-        budget=recorder.budget_summary(att), sandbox_status=info.status)
+        budget=recorder.budget_summary(att), sandbox_status=info.status,
+        agent_mode=_agent_mode_of(store.challenges.get(att.challenge_id)))
 
 @app.post("/attempts/{attempt_id}/heartbeat", response_model=SessionStatus)
 def heartbeat(attempt_id: str):
