@@ -18,7 +18,15 @@ const WS_BASE = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").rep
 
 type State = "idle" | "starting" | "live" | "offline" | "closed";
 
-export default function SandboxTerminal({ attemptId, submitted }: { attemptId: string; submitted: boolean }) {
+export interface SandboxUiState { state: State; backend?: string; expiresAt?: string | null; }
+export interface SandboxControls { start: () => void; stop: () => void; }
+
+export default function SandboxTerminal({ attemptId, submitted, onStateChange, controlsRef }: {
+  attemptId: string;
+  submitted: boolean;
+  onStateChange?: (s: SandboxUiState) => void;
+  controlsRef?: React.MutableRefObject<SandboxControls | null>;
+}) {
   const mountRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const [state, setState] = useState<State>(submitted ? "closed" : "idle");
@@ -112,6 +120,18 @@ export default function SandboxTerminal({ attemptId, submitted }: { attemptId: s
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Report state up (workbench status bar) and expose start/stop so the
+  // status bar buttons drive the SAME session logic as the panel buttons.
+  const stateRef = useRef(onStateChange);
+  stateRef.current = onStateChange;
+  useEffect(() => {
+    stateRef.current?.({ state, backend: session?.backend, expiresAt: session?.expires_at ?? null });
+  }, [state, session]);
+  useEffect(() => {
+    if (controlsRef) controlsRef.current = { start, stop };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  });
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
