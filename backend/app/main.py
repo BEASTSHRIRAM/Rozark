@@ -67,6 +67,45 @@ def me(authorization: str | None = Header(default=None)):
             return _public_user(rec)
     raise HTTPException(404, "User not found")
 
+def _current_user_record(authorization: str | None) -> UserRecord:
+    user_id = current_user_id(authorization)
+    for rec in store.users.values():
+        if rec.id == user_id: return rec
+    raise HTTPException(404, "User not found")
+
+@app.get("/org", response_model=OrgInfo)
+def get_org(authorization: str | None = Header(default=None)):
+    rec = _current_user_record(authorization)
+    members = [u for u in store.users.values() if u.company_name == rec.company_name]
+    # Challenges/attempts carry no owner field in this MVP store, so those
+    # counts are workspace-wide totals; member_count is truly org-scoped.
+    return OrgInfo(company_name=rec.company_name, member_count=len(members),
+                   challenge_count=len(store.challenges), attempt_count=len(store.attempts))
+
+@app.get("/org/members", response_model=list[User])
+def list_org_members(authorization: str | None = Header(default=None)):
+    rec = _current_user_record(authorization)
+    return [_public_user(u) for u in store.users.values() if u.company_name == rec.company_name]
+
+@app.patch("/auth/me", response_model=User)
+def update_me(body: MeUpdate, authorization: str | None = Header(default=None)):
+    rec = _current_user_record(authorization)
+    if body.name is not None and body.name.strip(): rec.name = body.name.strip()
+    if body.company_name is not None and body.company_name.strip(): rec.company_name = body.company_name.strip()
+    store.users[rec.email] = rec  # BlobDict write-through persists the mutation
+    return _public_user(rec)
+
+@app.post("/auth/change-password")
+def change_password(body: ChangePasswordRequest, authorization: str | None = Header(default=None)):
+    rec = _current_user_record(authorization)
+    if not verify_password(body.current_password, rec.password_hash):
+        raise HTTPException(401, "Current password is incorrect")
+    if len(body.new_password) < 8:
+        raise HTTPException(422, "New password must be at least 8 characters")
+    rec.password_hash = hash_password(body.new_password)
+    store.users[rec.email] = rec
+    return {"ok": True}
+
 @app.post("/challenges", response_model=Challenge, status_code=201)
 def create_challenge(body: ChallengeCreate):
     body.apply_defaults()
