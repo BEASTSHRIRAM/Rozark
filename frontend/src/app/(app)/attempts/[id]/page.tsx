@@ -209,6 +209,12 @@ export default function AttemptPage({ params }: { params: { id: string } }) {
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  // Two-step inline submit confirmation. A native window.confirm() dialog can
+  // be suppressed by browsers/automation and silently swallows the click —
+  // that is how the Submit button went dead with zero feedback. Every click
+  // on this button must therefore produce visible UI on its own.
+  const [confirmSubmit, setConfirmSubmit] = useState(false);
+  const confirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const openedDefaults = useRef(false);
 
   // --- workbench UI state ---------------------------------------------------
@@ -363,7 +369,14 @@ export default function AttemptPage({ params }: { params: { id: string } }) {
   }
 
   async function onSubmit() {
-    if (!window.confirm("Submit this attempt? Scoring runs first, then the workspace is frozen and the report is generated.")) return;
+    if (!confirmSubmit) {
+      setConfirmSubmit(true);
+      if (confirmTimer.current) clearTimeout(confirmTimer.current);
+      confirmTimer.current = setTimeout(() => setConfirmSubmit(false), 10000);
+      return;
+    }
+    if (confirmTimer.current) { clearTimeout(confirmTimer.current); confirmTimer.current = null; }
+    setConfirmSubmit(false);
     setSubmitting(true); setSubmitError("");
     try { await runScore(id); } catch { /* scoring is best-effort before submit */ }
     try {
@@ -392,22 +405,6 @@ export default function AttemptPage({ params }: { params: { id: string } }) {
     // The terminal start materialises the workspace server-side; refresh
     // the file list shortly after so the tree fills in.
     setTimeout(() => { loadFiles(); }, 1200);
-  }
-
-  // After the full agent edits files, refresh the tree and re-read any
-  // open tab whose on-disk content changed — without clobbering the
-  // candidate's own unsaved edits (content !== saved means dirty).
-  async function refreshAfterAgent() {
-    await loadFiles();
-    for (const t of tabs) {
-      if (t.content !== t.saved) continue;
-      try {
-        const f = await readFile(id, t.path);
-        if (f.content !== t.saved) {
-          setTabs((prev) => prev.map((x) => x.path === t.path && x.content === x.saved ? { ...x, content: f.content, saved: f.content } : x));
-        }
-      } catch { /* the file may have been removed by the agent */ }
-    }
   }
 
   const remaining = session?.expires_at ? Math.max(0, (new Date(session.expires_at).getTime() - now) / 1000) : session ? session.remaining_seconds : null;
@@ -456,13 +453,23 @@ export default function AttemptPage({ params }: { params: { id: string } }) {
             <div className="mt-1 h-1.5 w-40 rounded bg-gray-800"><div className="h-1.5 rounded bg-vermillion" style={{ width: `${elapsedPct}%` }} /></div>
           </div>
           {!submitted && (
-            <button onClick={onSubmit} disabled={submitting} className="rounded bg-sage px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
-              {submitting ? "Submitting…" : "Submit"}
-            </button>
+            <span className="flex items-center gap-2">
+              <button onClick={onSubmit} disabled={submitting} className="rounded bg-sage px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+                {submitting ? "Submitting…" : confirmSubmit ? "Confirm submit?" : "Submit"}
+              </button>
+              {confirmSubmit && !submitting && (
+                <button onClick={() => setConfirmSubmit(false)} className="rounded border border-gray-600 px-3 py-2 text-sm text-gray-300">Cancel</button>
+              )}
+            </span>
           )}
         </div>
       </div>
       {submitError && <p className="rounded border border-red-800/70 px-3 py-2 text-xs text-red-300">{submitError}</p>}
+      {confirmSubmit && !submitting && !submitted && (
+        <p className="rounded border border-[#E0A458]/50 bg-[#E0A458]/10 px-3 py-2 text-xs text-gray-200">
+          Click <strong>Confirm submit?</strong> to submit — scoring runs first, then the workspace is frozen and the report is generated.
+        </p>
+      )}
       {submitted && (
         <p className="rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-200">
           This attempt is <strong>submitted</strong> — the workspace is frozen and read-only.
@@ -706,7 +713,7 @@ export default function AttemptPage({ params }: { params: { id: string } }) {
           {/* SECONDARY SIDEBAR — mentor + public tests (unchanged panels) */}
           <div className="w-full shrink-0 space-y-4 p-3 lg:max-h-[880px] lg:w-[330px] lg:overflow-y-auto">
             <div id="rz-mentor" className="scroll-mt-24">
-              <AgentPanel attemptId={id} submitted={!!submitted} onBudget={setBudget} onAgentActivity={refreshAfterAgent} />
+              <AgentPanel attemptId={id} submitted={!!submitted} onBudget={setBudget} />
             </div>
             <div id="rz-tests" className="scroll-mt-24">
               <PublicTestsPanel attemptId={id} />
