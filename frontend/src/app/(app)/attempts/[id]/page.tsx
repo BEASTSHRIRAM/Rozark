@@ -5,14 +5,17 @@ import { useRouter } from "next/navigation";
 import SandboxTerminal from "@/components/SandboxTerminal";
 import CodeEditor from "@/components/CodeEditor";
 import AgentPanel from "@/components/AgentPanel";
+import PublicTestsPanel from "@/components/PublicTestsPanel";
 import { ApiError, fetchAttempt, fetchBudget, fetchChallenge, fetchSession, heartbeat, listFiles, readFile, runScore, startSandbox, submitAttempt, writeFile } from "@/lib/api";
 import type { Attempt, Challenge, SessionStatus, TokenBudget, WorkspaceFile } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
 // Attempt workspace — 3-pane layout, LIVE data.
 // Brief LEFT (real challenge) · Code MIDDLE (files API + Monaco editor,
-// terminal below is the live websocket PTY) · AI agent RIGHT (live panel:
-// components/AgentPanel.tsx — history from the event log + live composer).
+// terminal below is the live websocket PTY) · Mentor + Tests RIGHT
+// (mentor: components/AgentPanel.tsx — diagnose-only, SYMPTOM/WHERE/HINT;
+// tests: components/PublicTestsPanel.tsx — named public tests, hidden
+// tests as a locked count).
 // Header countdown comes from GET /attempts/{id}/session (polled 15s,
 // heartbeat POST every 30s); the budget bar from GET /attempts/{id}/budget
 // (polled 10s). Submit runs scoring (best-effort) then POST /submit.
@@ -332,8 +335,11 @@ export default function AttemptPage({ params }: { params: { id: string } }) {
           </div>
         </section>
 
-        {/* RIGHT — AI agent panel (live: components/AgentPanel.tsx) */}
-        <AgentPanel attemptId={id} submitted={!!submitted} onBudget={setBudget} />
+        {/* RIGHT — mentor panel (diagnose-only) + public tests checklist */}
+        <div className="space-y-4">
+          <AgentPanel attemptId={id} submitted={!!submitted} onBudget={setBudget} />
+          <PublicTestsPanel attemptId={id} />
+        </div>
       </div>
 
       <div className="flex gap-4">

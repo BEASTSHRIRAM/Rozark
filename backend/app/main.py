@@ -13,7 +13,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from .models import *
 from .store import store
 from .seed import seed
-from .scoring import compute_functional_score, compute_collaboration, compute_report_extras, parse_fs_score, parse_junit_xml, parse_tap
+from .scoring import compute_functional_score, compute_collaboration, compute_report_extras, parse_fs_score, parse_junit_xml, parse_tap, parse_junit_cases, parse_tap_cases
+from .mentor import run_mentor
 from .recorder import recorder, BudgetHardStop
 from .auth import hash_password, verify_password, create_token, current_user_id
 from .sandbox import sandbox_manager, SandboxUnavailable, TerminalInputTap, TerminalOutputTap, workspace_path_for
@@ -291,7 +292,7 @@ def run_score(attempt_id: str):
         exit_code=-1
         out=e.output or ""
         stdout=out.decode(errors="replace") if isinstance(out, bytes) else out
-    score=0.0; source="none"
+    score=0.0; source="none"; cases=[]
     fs=parse_fs_score(stdout)
     if fs is not None:
         score=fs; source="fs_score"
@@ -303,14 +304,15 @@ def run_score(attempt_id: str):
                 except OSError: xml_text=None
                 break
         if xml_text is not None:
-            score=parse_junit_xml(xml_text); source="junit"
+            score=parse_junit_xml(xml_text); source="junit"; cases=parse_junit_cases(xml_text)
         elif ch.scoring.format.value=="tap":
-            score=parse_tap(stdout); source="tap"
+            score=parse_tap(stdout); source="tap"; cases=parse_tap_cases(stdout)
         elif stdout.strip().startswith("<"):
-            score=parse_junit_xml(stdout); source="junit"
+            score=parse_junit_xml(stdout); source="junit"; cases=parse_junit_cases(stdout)
     run=ScoreRun(id=store._next("scorerun","run"), attempt_id=att.id, command=command,
                  exit_code=exit_code, score=score, source=source,
-                 stdout_tail=stdout[-2000:], ran_at=datetime.now(timezone.utc).isoformat().replace("+00:00","Z"))
+                 stdout_tail=stdout[-2000:], ran_at=datetime.now(timezone.utc).isoformat().replace("+00:00","Z"),
+                 tests=[TestCaseResult(**c) for c in cases])
     store.scoreruns[run.id]=run
     try:
         recorder.append(att, SessionEventCreate(type=EventType.test_run, actor=Actor.system, payload={"command": command, "exit_code": exit_code, "score": score, "source": source, "via": "score_run"}))
@@ -325,10 +327,12 @@ def get_score(attempt_id: str):
     return ScoreRunHistory(attempt_id=att.id, latest=runs[-1] if runs else None, runs=runs)
 
 # ---------------------------------------------------------------------------
-# Agent budget proxy: the ONLY path from a candidate session to the model
+# Agent budget proxy: the ONLY path from a candidate session to a model
 # API. The key never reaches the browser/sandbox; every call is recorded
 # (prompt -> token_usage -> agent_response) and the recorder's hard stop
-# refuses agent activity once the token cap is hit.
+# refuses agent activity once the token cap is hit. What sits behind it
+# is now the LangGraph MENTOR graph (app/mentor.py) — diagnose-only,
+# read-only context, guardrailed replies; see agent_chat below.
 #
 # Provider selection (first configured wins):
 #   1. Groq — GROQ_API_KEY set: OpenAI-compatible chat completions at
@@ -382,10 +386,10 @@ def _provider_json(resp) -> dict:
     try: return resp.json()
     except ValueError: raise HTTPException(502, "Agent provider returned invalid JSON")
 
-def _call_groq(key, model, system_prompt, prompt):
+def _call_groq(key, model, system_prompt, prompt, max_tokens=1024):
     resp = _provider_post(GROQ_API_URL,
                           {"Authorization": f"Bearer {key}", "content-type": "application/json"},
-                          {"model": model, "max_tokens": 1024,
+                          {"model": model, "max_tokens": max_tokens,
                            "messages": [{"role": "system", "content": system_prompt},
                                         {"role": "user", "content": prompt}]})
     data = _provider_json(resp)
@@ -396,10 +400,10 @@ def _call_groq(key, model, system_prompt, prompt):
     usage = data.get("usage", {}) or {}
     return text, _usage_int(usage.get("prompt_tokens")), _usage_int(usage.get("completion_tokens"))
 
-def _call_anthropic(key, model, system_prompt, prompt):
+def _call_anthropic(key, model, system_prompt, prompt, max_tokens=1024):
     resp = _provider_post(ANTHROPIC_API_URL,
                           {"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-                          {"model": model, "max_tokens": 1024, "system": system_prompt,
+                          {"model": model, "max_tokens": max_tokens, "system": system_prompt,
                            "messages": [{"role": "user", "content": prompt}]})
     data = _provider_json(resp)
     text = "".join(str(b.get("text", "")) for b in data.get("content", []) if isinstance(b, dict) and b.get("type") == "text")
@@ -411,6 +415,108 @@ def agent_status():
     provider, key, model = _agent_provider()
     return AgentStatus(configured=bool(key), provider=provider, model=model)
 
+# ---------------------------------------------------------------------------
+# Public tests (mentor-era feedback ceiling): named PUBLIC tests with
+# their latest status and, for failures, the Expected-vs-Received detail
+# from the latest scoring run. Hidden tests are exposed ONLY as counts —
+# never names, never assertions (the classic-question model in REPORT2).
+# ---------------------------------------------------------------------------
+
+def _is_hidden_test(ch, case: TestCaseResult) -> bool:
+    if ch is None: return False
+    if case.name in (ch.scoring.hidden_tests or []): return True
+    hidden_stems = set()
+    for entry in ch.ide_setup.hidden_files or []:
+        base = entry.replace("\\", "/").rstrip("/").split("/")[-1]
+        if base.endswith(".py"): base = base[:-3]
+        hidden_stems.add(base)
+    if not hidden_stems: return False
+    module = (case.classname or "").replace("/", ".").split(".")[-1]
+    return module in hidden_stems
+
+def _public_tests_for(att: Attempt) -> PublicTestsResponse:
+    ch = store.challenges.get(att.challenge_id)
+    runs = _score_runs_for(att.id)
+    if not runs:
+        return PublicTestsResponse(attempt_id=att.id)
+    latest = runs[-1]
+    public: list[PublicTestItem] = []
+    hidden_total = 0; hidden_passed = 0
+    for case in latest.tests:
+        if _is_hidden_test(ch, case):
+            hidden_total += 1
+            if case.status == "passed": hidden_passed += 1
+        else:
+            public.append(PublicTestItem(name=case.name, status=case.status,
+                                         expected=case.expected, received=case.received,
+                                         message=case.message))
+    return PublicTestsResponse(attempt_id=att.id, run_id=latest.id, tests=public,
+                               hidden=HiddenTestsSummary(total=hidden_total, passed=hidden_passed))
+
+@app.get("/attempts/{attempt_id}/tests/public", response_model=PublicTestsResponse)
+def public_tests(attempt_id: str):
+    att = store.attempts.get(attempt_id)
+    if not att: raise HTTPException(404, "Attempt not found")
+    return _public_tests_for(att)
+
+# ---------------------------------------------------------------------------
+# Mentor chat: the LangGraph mentor graph (app/mentor.py) behind the
+# existing chat contract. Plan/Agent modes are gone — the panel is a
+# mentor: it diagnoses (SYMPTOM / WHERE / HINT), never solves, and has no
+# file-write or command capability. Context gathering below is READ-ONLY.
+# ---------------------------------------------------------------------------
+
+def _mentor_context(att: Attempt, ch) -> dict:
+    ctx = {"brief": "", "files": "", "events": "", "tests": ""}
+    if ch is not None:
+        ctx["brief"] = (ch.problem_description or "")[:800]
+    # Workspace excerpts (read-only; hidden files are never read).
+    try:
+        ws = workspace_path_for(att.id)
+        if ws.is_dir():
+            chunks: list[str] = []
+            budget = 4000
+            for path in sorted(ws.rglob("*")):
+                if budget <= 0: break
+                rel = path.relative_to(ws).as_posix()
+                parts = set(path.relative_to(ws).parts)
+                if ".git" in parts or "__pycache__" in parts or not path.is_file(): continue
+                _ro, hid = _file_flags(att, rel)
+                if hid: continue
+                try: text = path.read_text(encoding="utf-8", errors="replace")
+                except OSError: continue
+                excerpt = "\n".join(text.splitlines()[:30])[:1200]
+                chunks.append(f"--- {rel} ---\n{excerpt}")
+                budget -= len(excerpt)
+            ctx["files"] = "\n\n".join(chunks)
+    except Exception:
+        pass
+    # Recent session evidence (errors and runs first-class).
+    lines = []
+    for e in recorder.ordered_events(att)[-12:]:
+        p = e.payload or {}
+        detail = ""
+        for k in ("command", "path", "text", "error"):
+            if p.get(k):
+                detail = f"{k}={str(p[k])[:200]}"
+                break
+        lines.append(f"[{e.type.value}] {detail}".rstrip())
+    ctx["events"] = "\n".join(lines)
+    # Latest public test results (hidden tests never enter mentor context).
+    pub = _public_tests_for(att)
+    if pub.run_id:
+        tlines = []
+        for t in pub.tests:
+            mark = "PASS" if t.status == "passed" else t.status.upper()
+            line = f"{mark}: {t.name}"
+            if t.status in ("failed", "error") and (t.expected or t.received):
+                line += f" — expected {t.expected}, received {t.received}"
+            tlines.append(line)
+        if pub.hidden.total:
+            tlines.append(f"({pub.hidden.total} hidden tests also ran; their details are never shown.)")
+        ctx["tests"] = "\n".join(tlines)
+    return ctx
+
 @app.post("/attempts/{attempt_id}/agent/chat", response_model=AgentChatResponse)
 def agent_chat(attempt_id: str, body: AgentChatRequest):
     att = store.attempts.get(attempt_id)
@@ -421,21 +527,37 @@ def agent_chat(attempt_id: str, body: AgentChatRequest):
     ch = store.challenges.get(att.challenge_id)
     provider, key, model = _agent_provider(ch)
     if not key:
-        return JSONResponse(status_code=503, content={"detail": "Agent proxy is not configured: set GROQ_API_KEY (or ANTHROPIC_API_KEY) on the backend.", "code": "agent_not_configured"})
+        return JSONResponse(status_code=503, content={"detail": "Mentor is not configured: set GROQ_API_KEY (or ANTHROPIC_API_KEY) on the backend.", "code": "agent_not_configured"})
     try:
-        recorder.append(att, SessionEventCreate(type=EventType.prompt, actor=Actor.candidate, payload={"text": body.prompt, "phase": body.phase, "mode": body.mode, "via": "agent_proxy"}))
+        recorder.append(att, SessionEventCreate(type=EventType.prompt, actor=Actor.candidate, payload={"text": body.prompt, "phase": body.phase, "mode": "mentor", "via": "mentor_graph"}))
     except BudgetHardStop as e:
         raise HTTPException(403, str(e))
-    system_prompt = (f"You are an AI coding agent helping a candidate inside a recorded Rozark assessment sandbox. "
-                     f"Challenge: {ch.title if ch else att.challenge_id}. "
-                     "Your prompts, tool use and responses are recorded and scored as collaboration evidence. Be concise and concrete.")
-    if provider == "groq":
-        text, tokens_in, tokens_out = _call_groq(key, model, system_prompt, body.prompt)
-    else:
-        text, tokens_in, tokens_out = _call_anthropic(key, model, system_prompt, body.prompt)
-    recorder.append(att, SessionEventCreate(type=EventType.token_usage, actor=Actor.system, payload={"tokens_in": tokens_in, "tokens_out": tokens_out, "phase": body.phase, "via": "agent_proxy", "provider": provider, "model": model}))
-    recorder.append(att, SessionEventCreate(type=EventType.agent_response, actor=Actor.agent, payload={"text": text, "phase": body.phase, "via": "agent_proxy"}))
-    return AgentChatResponse(response_text=text, tokens_in=tokens_in, tokens_out=tokens_out, budget=recorder.budget_summary(att))
+
+    def _call_llm(system_prompt: str, user_prompt: str):
+        if provider == "groq":
+            return _call_groq(key, model, system_prompt, user_prompt, max_tokens=2048)
+        return _call_anthropic(key, model, system_prompt, user_prompt, max_tokens=2048)
+
+    result = run_mentor(
+        gather_context=lambda: _mentor_context(att, ch),
+        call_llm=_call_llm,
+        prompt=body.prompt, phase=body.phase,
+        challenge_title=ch.title if ch else att.challenge_id)
+    tokens_in = int(result.get("tokens_in") or 0)
+    tokens_out = int(result.get("tokens_out") or 0)
+    recorder.append(att, SessionEventCreate(type=EventType.token_usage, actor=Actor.system, payload={"tokens_in": tokens_in, "tokens_out": tokens_out, "phase": body.phase, "via": "mentor_graph", "provider": provider, "model": model, "llm_calls": int(result.get("llm_calls") or 1)}))
+    if result.get("guardrail_action") not in (None, "", "pass"):
+        try:
+            recorder.append(att, SessionEventCreate(type=EventType.mentor_guardrail, actor=Actor.system, payload={"action": result.get("guardrail_action"), "violations": result.get("violations") or [], "phase": body.phase, "via": "mentor_graph"}))
+        except BudgetHardStop:
+            pass
+    text = str(result.get("reply") or "")
+    recorder.append(att, SessionEventCreate(type=EventType.agent_response, actor=Actor.agent, payload={"text": text, "phase": body.phase, "via": "mentor_graph", "symptom": result.get("symptom", ""), "where": result.get("where", ""), "hint": result.get("hint", "")}))
+    return AgentChatResponse(response_text=text, tokens_in=tokens_in, tokens_out=tokens_out,
+                             budget=recorder.budget_summary(att),
+                             symptom=str(result.get("symptom") or ""), where=str(result.get("where") or ""),
+                             hint=str(result.get("hint") or ""),
+                             guardrail_intervened=result.get("guardrail_action") not in (None, "", "pass"))
 
 # ---------------------------------------------------------------------------
 # Workspace files (B5, restored): the editor's view of the sandbox

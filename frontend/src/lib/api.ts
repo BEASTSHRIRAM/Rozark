@@ -26,7 +26,7 @@ export const sampleChallenges=[{id:"chal_0001",title:"Fix the orders API paginat
 // helper throws ApiError with the HTTP status + parsed `detail` on failure
 // so pages can distinguish 404 (not submitted), 403 (read-only / budget
 // hard stop), 409 (no workspace yet) and 503 (agent not configured).
-import type { AgentChatResult, AgentStatus, Attempt, Challenge, FileContent, FileList, Report, Replay, ScoreSummary, ScoreRun, SessionEvent, SessionStatus, TokenBudget } from "./types";
+import type { AgentChatResult, AgentStatus, Attempt, Challenge, FileContent, FileList, PublicTests, Report, Replay, ScoreSummary, ScoreRun, SessionEvent, SessionStatus, TokenBudget } from "./types";
 
 export class ApiError extends Error {
   status: number;
@@ -78,4 +78,5 @@ export function submitAttempt(id: string): Promise<Report> { return req(`/attemp
 export function fetchReport(id: string): Promise<Report> { return req(`/attempts/${id}/report`); }
 export function fetchReplay(id: string): Promise<Replay> { return req(`/attempts/${id}/replay`); }
 export function agentStatus(): Promise<AgentStatus> { return req(`/agent/status`); }
-export function agentChat(id: string, body: { prompt: string; phase: string; mode: string }): Promise<AgentChatResult> { return req(`/attempts/${id}/agent/chat`, jsonInit("POST", body)); }
+export function agentChat(id: string, body: { prompt: string; phase: string; mode?: string }): Promise<AgentChatResult> { return req(`/attempts/${id}/agent/chat`, jsonInit("POST", body)); }
+export function fetchPublicTests(id: string): Promise<PublicTests> { return req(`/attempts/${id}/tests/public`); }

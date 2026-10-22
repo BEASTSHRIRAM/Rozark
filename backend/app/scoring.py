@@ -153,3 +153,68 @@ def compute_report_extras(events: list[SessionEvent], attempt, total: float):
         git_snapshots=len(_ev(events, EventType.git_snapshot)),
         duration_seconds=duration, time_to_first_edit_seconds=ttf)
     return verdict, signals, concerns, metrics
+
+# ---------------------------------------------------------------------------
+# Per-case parsing (mentor / public-tests): names + status for every case,
+# and for failures an Expected-vs-Received pair when the runner's message
+# carries one. This is the feedback ceiling the references demonstrate —
+# full assertion detail for PUBLIC tests, counts only for hidden ones.
+# ---------------------------------------------------------------------------
+
+_EXPECTED_RE = re.compile(
+    r"expected[:\s]+(.+?)(?:,?\s+(?:but\s+)?(?:got|received|was|actual)[:\s]+|\s*$)(.*)$",
+    re.IGNORECASE | re.DOTALL)
+_ASSERT_EQ_RE = re.compile(r"assert\s+(.+?)\s*==\s*(.+)$", re.IGNORECASE | re.DOTALL)
+
+def _expected_received(text: str) -> tuple[str, str]:
+    """Best-effort (expected, received) split of a failure message.
+
+    Handles the common shapes: "expected 2 items, got 3",
+    "expected: X but was: Y", pytest's "assert <received> == <expected>".
+    Returns ("", "") when no shape matches — the raw message still shows.
+    """
+    if not text: return "", ""
+    t = " ".join(text.split())
+    m = _EXPECTED_RE.search(t)
+    if m and m.group(2).strip():
+        return m.group(1).strip().rstrip(","), m.group(2).strip()
+    m = _ASSERT_EQ_RE.search(t)
+    if m:
+        # pytest prints assert <actual> == <expected>
+        return m.group(2).strip(), m.group(1).strip()
+    return "", ""
+
+def parse_junit_cases(xml_text: str) -> list[dict]:
+    """Per-testcase results from JUnit/xUnit XML (name, status, detail)."""
+    if not xml_text or not xml_text.strip(): return []
+    try: root = ET.fromstring(xml_text)
+    except ET.ParseError: return []
+    cases = []
+    for tc in root.iter("testcase"):
+        name = tc.get("name") or ""
+        if not name: continue
+        status = "passed"; detail = ""
+        for child_tag, st in (("failure", "failed"), ("error", "error"), ("skipped", "skipped")):
+            child = tc.find(child_tag)
+            if child is not None:
+                status = st
+                detail = " ".join([child.get("message") or "", child.text or ""]).strip()
+                break
+        expected, received = _expected_received(detail) if status in ("failed", "error") else ("", "")
+        cases.append({"name": name, "classname": tc.get("classname") or "",
+                      "status": status, "expected": expected, "received": received,
+                      "message": detail if status in ("failed", "error") else ""})
+    return cases
+
+def parse_tap_cases(tap_text: str) -> list[dict]:
+    """Per-case results from TAP output ("ok 1 - name" / "not ok 2 - name")."""
+    cases = []
+    if not tap_text: return cases
+    for line in tap_text.splitlines():
+        s = line.strip()
+        m = re.match(r"(not\s+)?ok\s+\d+\s*-?\s*(.*)$", s)
+        if not m: continue
+        cases.append({"name": m.group(2).strip() or s, "classname": "",
+                      "status": "failed" if m.group(1) else "passed",
+                      "expected": "", "received": "", "message": ""})
+    return cases
