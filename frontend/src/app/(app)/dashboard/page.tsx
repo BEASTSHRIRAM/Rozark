@@ -1,8 +1,25 @@
 import Link from "next/link";
-import { fetchChallenges } from "@/lib/api";
+import { fetchAttempts, fetchChallenges } from "@/lib/api";
 
 export default async function DashboardPage() {
   const challenges = await fetchChallenges();
+  const latest = challenges.slice(0, 3);
+  // Resolve each challenge's most recent attempt so the link targets a real
+  // attempt id. Linking the challenge id produced dead /attempts/<challenge>
+  // routes. Challenges with no attempts get a muted note instead of a link.
+  const cards = await Promise.all(
+    latest.map(async (c: any) => {
+      try {
+        const atts = await fetchAttempts(c.id);
+        const sorted = [...atts].sort((a: any, b: any) =>
+          String(b.started_at || "").localeCompare(String(a.started_at || "")),
+        );
+        return { challenge: c, attempt: sorted[0] || null };
+      } catch {
+        return { challenge: c, attempt: null };
+      }
+    }),
+  );
   return (
     <div className="space-y-8">
       <div>
@@ -34,12 +51,16 @@ export default async function DashboardPage() {
 
       <section className="space-y-3">
         <h2 className="text-lg font-semibold text-white">Latest challenges</h2>
-        {challenges.slice(0, 3).map((c: any) => (
+        {cards.map(({ challenge: c, attempt }: any) => (
           <article key={c.id} className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
             <h3 className="font-semibold text-white">{c.title}</h3>
             <p className="text-sm text-gray-400">{c.type} · {c.difficulty} · {c.score} pts · {c.recommended_time_minutes} min</p>
             <p className="mt-2 text-sm text-gray-300">{c.problem_description}</p>
-            <Link className="mt-2 inline-block text-sm text-cobaltlt hover:underline" href={`/attempts/${c.id}`}>Open attempt view →</Link>
+            {attempt ? (
+              <Link className="mt-2 inline-block text-sm text-cobaltlt hover:underline" href={`/attempts/${attempt.id}`}>Open attempt view →</Link>
+            ) : (
+              <p className="mt-2 text-xs text-gray-500">No attempts yet — create one from the Challenges page.</p>
+            )}
           </article>
         ))}
       </section>
