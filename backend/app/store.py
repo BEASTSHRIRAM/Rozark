@@ -29,9 +29,9 @@ import sqlite3
 import threading
 from pathlib import Path
 
-from .models import Attempt, Challenge, Report, UserRecord
+from .models import Attempt, Challenge, Report, ScoreRun, UserRecord
 
-_MODELS = {"challenge": Challenge, "attempt": Attempt, "report": Report, "user": UserRecord}
+_MODELS = {"challenge": Challenge, "attempt": Attempt, "report": Report, "user": UserRecord, "scorerun": ScoreRun}
 
 
 def default_db_path() -> str:
@@ -80,6 +80,7 @@ class Store:
         self.reports: dict[str, Report] = BlobDict(self, "report")
         # Users keyed by lowercase email (same as the in-memory version).
         self.users: dict[str, UserRecord] = BlobDict(self, "user")
+        self.scoreruns: dict[str, ScoreRun] = BlobDict(self, "scorerun")
         self._load()
 
     # -- persistence primitives -------------------------------------------
@@ -102,6 +103,7 @@ class Store:
             "attempt": self.attempts,
             "report": self.reports,
             "user": self.users,
+            "scorerun": self.scoreruns,
         }
         with self._lock:
             rows = self._conn.execute("SELECT kind, id, data FROM kv").fetchall()

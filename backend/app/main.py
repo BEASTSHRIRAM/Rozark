@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import select
+import subprocess
 import threading
 import httpx
 from datetime import datetime, timedelta, timezone
@@ -12,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .models import *
 from .store import store
 from .seed import seed
-from .scoring import compute_functional_score, compute_collaboration
+from .scoring import compute_functional_score, compute_collaboration, parse_fs_score, parse_junit_xml, parse_tap
 from .recorder import recorder, BudgetHardStop
 from .auth import hash_password, verify_password, create_token, current_user_id
 from .sandbox import sandbox_manager, SandboxUnavailable, TerminalInputTap, TerminalOutputTap, workspace_path_for
@@ -255,6 +256,72 @@ def get_budget(attempt_id: str):
     att=store.attempts.get(attempt_id)
     if not att: raise HTTPException(404,"Attempt not found")
     return recorder.budget_summary(att)
+
+# ---------------------------------------------------------------------------
+# Scoring runs (B7): run the challenge's scoring/test command inside the
+# workspace, parse the output with the same parsers as submit-time
+# scoring, persist every run, and let submit fall back to the latest run.
+# ---------------------------------------------------------------------------
+
+def _score_runs_for(attempt_id: str) -> list[ScoreRun]:
+    return [r for r in store.scoreruns.values() if r.attempt_id == attempt_id]
+
+@app.post("/attempts/{attempt_id}/score/run", response_model=ScoreRun)
+def run_score(attempt_id: str):
+    att=store.attempts.get(attempt_id)
+    if not att: raise HTTPException(404,"Attempt not found")
+    ws=workspace_path_for(att.id)
+    if not ws.is_dir(): raise HTTPException(409,"sandbox not started")
+    ch=store.challenges.get(att.challenge_id)
+    if not ch: raise HTTPException(404,"Challenge not found")
+    if ch.scoring.mode.value=="custom" and ch.scoring.scoring_command:
+        command=ch.scoring.scoring_command
+    elif ch.scoring.scoring_command:
+        command=ch.scoring.scoring_command
+    else:
+        command=ch.ide_setup.test_command
+    try: timeout=int(os.environ.get("ROZARK_SCORE_TIMEOUT") or 120)
+    except ValueError: timeout=120
+    exit_code=0; stdout=""
+    try:
+        proc=subprocess.run(command, shell=True, cwd=str(ws), capture_output=True, text=True, timeout=timeout)
+        exit_code=proc.returncode; stdout=proc.stdout or ""
+    except subprocess.TimeoutExpired as e:
+        exit_code=-1
+        out=e.output or ""
+        stdout=out.decode(errors="replace") if isinstance(out, bytes) else out
+    score=0.0; source="none"
+    fs=parse_fs_score(stdout)
+    if fs is not None:
+        score=fs; source="fs_score"
+    else:
+        xml_text=None
+        for rel in ch.scoring.scoring_output_files:
+            if rel.endswith(".xml") and (ws/rel).is_file():
+                try: xml_text=(ws/rel).read_text(encoding="utf-8", errors="replace")
+                except OSError: xml_text=None
+                break
+        if xml_text is not None:
+            score=parse_junit_xml(xml_text); source="junit"
+        elif ch.scoring.format.value=="tap":
+            score=parse_tap(stdout); source="tap"
+        elif stdout.strip().startswith("<"):
+            score=parse_junit_xml(stdout); source="junit"
+    run=ScoreRun(id=store._next("scorerun","run"), attempt_id=att.id, command=command,
+                 exit_code=exit_code, score=score, source=source,
+                 stdout_tail=stdout[-2000:], ran_at=datetime.now(timezone.utc).isoformat().replace("+00:00","Z"))
+    store.scoreruns[run.id]=run
+    try:
+        recorder.append(att, SessionEventCreate(type=EventType.test_run, actor=Actor.system, payload={"command": command, "exit_code": exit_code, "score": score, "source": source, "via": "score_run"}))
+    except Exception: pass
+    return run
+
+@app.get("/attempts/{attempt_id}/score", response_model=ScoreRunHistory)
+def get_score(attempt_id: str):
+    att=store.attempts.get(attempt_id)
+    if not att: raise HTTPException(404,"Attempt not found")
+    runs=_score_runs_for(att.id)
+    return ScoreRunHistory(attempt_id=att.id, latest=runs[-1] if runs else None, runs=runs)
 
 # ---------------------------------------------------------------------------
 # Agent budget proxy (B6): the ONLY path from a candidate session to the
@@ -571,7 +638,11 @@ def submit(attempt_id: str, body: SubmitRequest):
     try: sandbox_manager.freeze(att, reason="candidate_submit")
     except Exception: pass
     ch=store.challenges[att.challenge_id]
-    functional=compute_functional_score(junit_xml=body.junit_xml, tap_output=body.tap_output, scorer_output=body.scorer_output, manual=body.manual_functional_score)
+    _runs=_score_runs_for(att.id)
+    if body.junit_xml is None and body.tap_output is None and body.scorer_output is None and body.manual_functional_score is None and _runs:
+        functional=_runs[-1].score  # latest scoring run (B7) is the functional evidence
+    else:
+        functional=compute_functional_score(junit_xml=body.junit_xml, tap_output=body.tap_output, scorer_output=body.scorer_output, manual=body.manual_functional_score)
     collab, breakdown = compute_collaboration(att.events)
     total=round(ch.rubric_weights.functional*functional + ch.rubric_weights.ai_collaboration*collab,2)
     report=Report(attempt_id=att.id, challenge_id=att.challenge_id, candidate_name=att.candidate_name, functional_score=functional, ai_collaboration_score=collab, total_score=total, breakdown=breakdown, timeline=list(att.events))
