@@ -450,8 +450,7 @@ export default function AttemptPage({ params }: { params: { id: string } }) {
       {submitError && <p className="rounded border border-red-800/70 px-3 py-2 text-xs text-red-300">{submitError}</p>}
       {submitted && (
         <p className="rounded border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-200">
-          This attempt is <strong>submitted</strong> — the workspace is frozen and read-only.{" "}
-          <Link className="text-cobaltlt underline" href={`/reports/${id}`}>View the report →</Link>
+          This attempt is <strong>submitted</strong> — the workspace is frozen and read-only.
         </p>
       )}
       <div className="w-full max-w-md"><BudgetBar budget={budget} /></div>
@@ -727,10 +726,10 @@ export default function AttemptPage({ params }: { params: { id: string } }) {
         </div>
       </section>
 
-      <div className="flex gap-4">
-        <Link className="text-sm text-cobaltlt" href={`/reports/${id}`}>View evidence report →</Link>
-        <Link className="text-sm text-cobaltlt" href={`/attempts/${id}/replay`}>Watch session replay →</Link>
-      </div>
+      {/* No footer links here on purpose: the evidence report and session
+          replay are RECRUITER review surfaces. A candidate mid-test must
+          never see a path into them (they render in the recruiter shell).
+          Recruiters reach both from the reports list / dashboard. */}
     </div>
   );
 }
