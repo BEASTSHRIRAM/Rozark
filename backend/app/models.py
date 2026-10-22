@@ -28,7 +28,7 @@ class EventType(str, Enum):
     terminal_cmd="terminal_cmd"; terminal_output="terminal_output"
     paste_event="paste_event"; clipboard_event="clipboard_event"; tab_switch="tab_switch"
     token_usage="token_usage"; git_snapshot="git_snapshot"
-    budget_exceeded="budget_exceeded"; session_submitted="session_submitted"
+    budget_exceeded="budget_exceeded"; session_submitted="session_submitted"; session_expired="session_expired"
 
 DIFFICULTY_DEFAULTS={Difficulty.easy:(50,15), Difficulty.medium:(75,30), Difficulty.hard:(100,60)}
 
@@ -122,6 +122,11 @@ class Attempt(BaseModel):
     budget_exceeded: bool=False
     budget_hard_stop: bool=False
     events: list[SessionEvent]=Field(default_factory=list)
+    # --- session lifecycle (B3, restored) ---
+    started_at: str=""
+    last_heartbeat_at: str=""
+    time_limit_minutes: int=0
+    expires_at: str=""
 class SubmitRequest(BaseModel):
     junit_xml: Optional[str]=None
     tap_output: Optional[str]=None
@@ -192,6 +197,50 @@ class Replay(BaseModel):
     events: list[SessionEvent]=Field(default_factory=list)
     git_snapshots: list[dict[str,Any]]=Field(default_factory=list)
     token_budget: Optional[TokenBudgetSummary]=None
+
+class SessionStatus(BaseModel):
+    attempt_id: str
+    status: str
+    started_at: str=""
+    expires_at: str=""
+    elapsed_seconds: int=0
+    remaining_seconds: int=0
+    time_limit_minutes: int=0
+    budget: Optional[TokenBudgetSummary]=None
+    sandbox_status: str="not_started"
+
+class WorkspaceFile(BaseModel):
+    path: str
+    size: int
+    read_only: bool=False
+    hidden: bool=False
+class FileListResponse(BaseModel):
+    attempt_id: str
+    files: list[WorkspaceFile]=Field(default_factory=list)
+class FileContentResponse(BaseModel):
+    path: str
+    content: str
+    read_only: bool=False
+class FileWriteRequest(BaseModel):
+    path: str
+    content: str
+class FileWriteResponse(BaseModel):
+    path: str
+    size: int
+
+class ScoreRun(BaseModel):
+    id: str
+    attempt_id: str
+    command: str
+    exit_code: int=0
+    score: float=0.0
+    source: str="none"  # fs_score | junit | tap | none
+    stdout_tail: str=""
+    ran_at: str=""
+class ScoreRunHistory(BaseModel):
+    attempt_id: str
+    latest: Optional[ScoreRun]=None
+    runs: list[ScoreRun]=Field(default_factory=list)
 
 class AgentStatus(BaseModel):
     configured: bool

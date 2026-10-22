@@ -61,6 +61,11 @@ def workspaces_root() -> Path:
     return Path(os.environ.get("ROZARK_WORKSPACES", str(BACKEND_DIR / "workspaces")))
 
 
+def workspace_path_for(attempt_id: str) -> Path:
+    """The on-disk workspace directory for an attempt (may not exist yet)."""
+    return workspaces_root() / attempt_id
+
+
 def _load_sidecar():
     """Import sandbox/recorder_sidecar.py (not a package) for its pure
     scan/diff/snapshot functions — the same code that runs in-container."""
