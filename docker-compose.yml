@@ -28,7 +28,7 @@ services:
       ROZARK_WORKSPACES: /data/workspaces
       # AI key passthrough from the host env / .env, with safe defaults.
       GROQ_API_KEY: ${GROQ_API_KEY:-}
-      GROQ_MODEL: ${GROQ_MODEL:-llama-3.3-70b-versatile}
+      GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-120b}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ROZARK_AI_API_KEY: ${ROZARK_AI_API_KEY:-}
       ROZARK_AI_MODEL: ${ROZARK_AI_MODEL:-claude-sonnet-4-5}

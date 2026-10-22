@@ -338,6 +338,7 @@ export default function AttemptPage({ params }: { params: { id: string } }) {
 
       <div className="flex gap-4">
         <Link className="text-sm text-cobaltlt" href={`/reports/${id}`}>View evidence report →</Link>
+        <Link className="text-sm text-cobaltlt" href={`/attempts/${id}/replay`}>Watch session replay →</Link>
       </div>
     </div>
   );

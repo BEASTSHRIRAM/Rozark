@@ -167,6 +167,14 @@ project. If you deploy this repo to Vercel:
 3. Set `NEXT_PUBLIC_API_URL` to your deployed backend URL (defaults to
    `http://localhost:8000` for local dev).
 
+### Demo data (optional)
+
+Set `ROZARK_SEED_DEMO=1` in `.env` (or your shell) and start the backend:
+it seeds one demo attempt ("Demo Candidate") on the sample challenge with
+a realistic recorded session, already submitted and scored through the
+real scoring path, so `GET /attempts/{id}/report` returns a real report
+on first boot. The seed is idempotent (a second boot changes nothing) and
+off by default.
 
 ## Status
 

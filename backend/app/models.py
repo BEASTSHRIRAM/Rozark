@@ -137,6 +137,19 @@ class DimensionScore(BaseModel):
     score: float
     evidence_event_ids: list[str]=Field(default_factory=list)
     notes: str=""
+class ReportSignal(BaseModel):
+    text: str
+    evidence_event_ids: list[str]=Field(default_factory=list)
+class ReportMetrics(BaseModel):
+    prompts_total: int=0
+    prompts_by_phase: dict[str,int]=Field(default_factory=dict)
+    tokens_used: int=0
+    token_budget: int=0
+    test_runs: int=0
+    files_edited: int=0
+    git_snapshots: int=0
+    duration_seconds: int=0
+    time_to_first_edit_seconds: Optional[int]=None
 class Report(BaseModel):
     attempt_id: str
     challenge_id: str
@@ -146,6 +159,10 @@ class Report(BaseModel):
     total_score: float
     breakdown: list[DimensionScore]=Field(default_factory=list)
     timeline: list[SessionEvent]=Field(default_factory=list)
+    verdict: str=""
+    signals: list[ReportSignal]=Field(default_factory=list)
+    concerns: list[ReportSignal]=Field(default_factory=list)
+    metrics: Optional[ReportMetrics]=None
 class TokenBudgetSummary(BaseModel):
     budget: int
     used: int
@@ -255,3 +272,25 @@ class AgentChatResponse(BaseModel):
     tokens_in: int
     tokens_out: int
     budget: Optional[TokenBudgetSummary]=None
+
+class MeUpdate(BaseModel):
+    name: Optional[str]=None
+    company_name: Optional[str]=None
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+class OrgInfo(BaseModel):
+    company_name: str
+    member_count: int
+    challenge_count: int
+    attempt_count: int
+class EventsBatchRequest(BaseModel):
+    events: list[SessionEventCreate]=Field(default_factory=list)
+class EventsBatchResponse(BaseModel):
+    accepted: int
+    events: list[SessionEvent]=Field(default_factory=list)
+class EventsSummary(BaseModel):
+    total: int
+    by_type: dict[str,int]=Field(default_factory=dict)
+    by_actor: dict[str,int]=Field(default_factory=dict)
+    by_stream: dict[str,int]=Field(default_factory=dict)
