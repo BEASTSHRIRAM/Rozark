@@ -4,7 +4,7 @@ import os
 import select
 import threading
 
-from fastapi import FastAPI, HTTPException, Header, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Header, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from .models import *
 from .store import store
@@ -81,6 +81,41 @@ def get_challenge(challenge_id: str):
     ch=store.challenges.get(challenge_id)
     if not ch: raise HTTPException(404,"Challenge not found")
     return ch
+
+@app.put("/challenges/{challenge_id}", response_model=Challenge)
+def update_challenge(challenge_id: str, body: ChallengeCreate):
+    if challenge_id not in store.challenges: raise HTTPException(404,"Challenge not found")
+    body.apply_defaults()
+    ch=Challenge(id=challenge_id, **body.model_dump())
+    store.challenges[ch.id]=ch; return ch
+
+@app.delete("/challenges/{challenge_id}", status_code=204)
+def delete_challenge(challenge_id: str):
+    if challenge_id not in store.challenges: raise HTTPException(404,"Challenge not found")
+    if any(a.challenge_id==challenge_id for a in store.attempts.values()):
+        raise HTTPException(409,"Challenge has attempts and cannot be deleted")
+    del store.challenges[challenge_id]
+    return Response(status_code=204)
+
+@app.post("/challenges/{challenge_id}/clone", response_model=Challenge, status_code=201)
+def clone_challenge(challenge_id: str):
+    src=store.challenges.get(challenge_id)
+    if not src: raise HTTPException(404,"Challenge not found")
+    data=src.model_dump(); data.pop("id", None); data["title"]=src.title+" (copy)"
+    ch=Challenge(id=store.next_challenge_id(), **data)
+    store.challenges[ch.id]=ch; return ch
+
+@app.get("/challenges/{challenge_id}/attempts", response_model=list[Attempt])
+def list_challenge_attempts(challenge_id: str):
+    if challenge_id not in store.challenges: raise HTTPException(404,"Challenge not found")
+    return [a for a in store.attempts.values() if a.challenge_id==challenge_id]
+
+@app.get("/attempts", response_model=list[Attempt])
+def list_attempts(challenge_id: str | None = None, status: str | None = None):
+    out=list(store.attempts.values())
+    if challenge_id is not None: out=[a for a in out if a.challenge_id==challenge_id]
+    if status is not None: out=[a for a in out if a.status==status]
+    return out
 
 @app.post("/attempts", response_model=Attempt, status_code=201)
 def start_attempt(body: AttemptCreate):
