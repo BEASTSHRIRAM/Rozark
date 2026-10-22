@@ -264,3 +264,17 @@ class AgentChatResponse(BaseModel):
     tokens_in: int
     tokens_out: int
     budget: Optional[TokenBudgetSummary]=None
+
+class ScoreRun(BaseModel):
+    id: str
+    attempt_id: str
+    command: str
+    exit_code: int=0
+    score: float=0.0
+    source: str="none"  # fs_score | junit | tap | none
+    stdout_tail: str=""
+    ran_at: str=""
+class ScoreRunHistory(BaseModel):
+    attempt_id: str
+    latest: Optional[ScoreRun]=None
+    runs: list[ScoreRun]=Field(default_factory=list)
