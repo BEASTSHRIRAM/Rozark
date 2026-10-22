@@ -17,4 +17,6 @@ export interface FileContent { path:string; content:string; read_only:boolean; }
 export interface ScoreRun { id:string; command:string; exit_code:number; score:number|null; source:string; stdout_tail:string; ran_at:string; }
 export interface ScoreSummary { attempt_id:string; latest:ScoreRun|null; runs:ScoreRun[]; }
 export interface AgentStatus { configured:boolean; provider:string; model:string; }
-export interface AgentChatResult { response_text:string; tokens_in:number; tokens_out:number; budget:TokenBudget; }
+export interface AgentChatResult { response_text:string; tokens_in:number; tokens_out:number; budget:TokenBudget; symptom?:string; where?:string; hint?:string; guardrail_intervened?:boolean; }
+export interface PublicTestItem { name:string; status:string; expected:string; received:string; message:string; }
+export interface PublicTests { attempt_id:string; run_id:string|null; tests:PublicTestItem[]; hidden:{ total:number; passed:number }; }

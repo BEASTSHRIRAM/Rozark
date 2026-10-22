@@ -5,9 +5,11 @@ import { useRouter } from "next/navigation";
 import { fetchAttempt, fetchChallenge, fetchSession, startSandbox } from "@/lib/api";
 import type { Attempt, Challenge, SessionStatus } from "@/lib/types";
 
-// Candidate lobby: shown before the attempt workspace. Confirms who is
-// taking which challenge, states the rules (time limit, token budget, what
-// is recorded, read-only files), and starts the sandbox on entry.
+// Candidate lobby: shown before the attempt workspace. HackerRank-style
+// rules interstitial: the fairness contract (including the mentor's
+// diagnose-only rule) is stated up front, before the attempt starts —
+// then the practical details (time limit, budget, read-only files) and
+// the Start CTA, which starts the sandbox on entry.
 export default function LobbyPage({ params }: { params: { id: string } }) {
   const id = params.id;
   const router = useRouter();
@@ -81,14 +83,21 @@ export default function LobbyPage({ params }: { params: { id: string } }) {
       ) : null}
 
       <section className="rounded border border-gray-700 p-4">
-        <h2 className="font-semibold">Rules</h2>
+        <h2 className="font-semibold">Before you start</h2>
+        <ul className="mt-2 space-y-2 text-sm text-gray-300">
+          <li><strong className="text-gray-100">Work independently.</strong> Your terminal commands, file edits, prompts and test runs are recorded as one session log and reviewed as evidence.</li>
+          <li><strong className="text-gray-100">The built-in mentor can explain what&apos;s wrong and point you at what to check; it will never write or fix code for you.</strong> Everything you ask it is recorded.</li>
+          <li><strong className="text-gray-100">Read-only and hidden files stay locked.</strong> Editing them is disabled, and the hidden test suite runs only at submit — public tests show their names and expected-vs-received results as you go.</li>
+        </ul>
+      </section>
+
+      <section className="rounded border border-gray-700 p-4">
+        <h2 className="font-semibold">The details</h2>
         <ul className="mt-2 list-disc space-y-1.5 pl-5 text-sm text-gray-300">
           {timeLimit ? <li>Time limit: <strong>{timeLimit} minutes</strong> — the countdown starts with your session and the workspace freezes at submit or expiry.</li> : null}
-          {budget ? <li>AI token budget: <strong>{budget.toLocaleString()} tokens</strong>, tracked per phase (planning / building / debugging). A hard stop may apply when the budget is exhausted.</li> : null}
-          <li>Everything is recorded as one ordered event log: <strong>terminal commands and output</strong>, <strong>file edits</strong>, <strong>agent prompts, responses and tool calls</strong>, test runs and git snapshots.</li>
+          {budget ? <li>Mentor token budget: <strong>{budget.toLocaleString()} tokens</strong>, tracked per phase (planning / building / debugging). A hard stop may apply when the budget is exhausted.</li> : null}
           {challenge?.ide_setup.read_only_files.length ? <li>Read-only files (cannot be edited): <span className="font-mono text-xs">{challenge.ide_setup.read_only_files.join(", ")}</span></li> : null}
-          {challenge?.ide_setup.hidden_files.length ? <li>Some test files are hidden; the hidden suite runs at submit and its source is never shown.</li> : null}
-          <li>You may use the built-in AI agent panel and the live terminal. Paste events are logged — just work the way you normally would.</li>
+          <li>You may use the built-in mentor panel, the public tests checklist and the live terminal. Paste events are logged — just work the way you normally would.</li>
         </ul>
       </section>
 

@@ -106,11 +106,14 @@ def test_groq_chat_mocked_records_events_and_budget(monkeypatch):
     assert d["response_text"] == "Groq agent reply" and d["tokens_in"] == 13 and d["tokens_out"] == 9
     assert d["budget"]["used"] == 22
     # Request shape: OpenAI-compatible chat completions, default model,
-    # system + user messages.
+    # system + user messages. The user message is the mentor graph's
+    # assembled prompt (context + the candidate's ask), so the raw prompt
+    # is contained in it rather than equal to it.
     sent = _FakeGroqClient.last["json"]
     assert sent["model"] == "openai/gpt-oss-120b"
     assert [m["role"] for m in sent["messages"]] == ["system", "user"]
-    assert sent["messages"][1]["content"] == "fix the pagination bug"
+    assert "fix the pagination bug" in sent["messages"][1]["content"]
+    assert "MENTOR" in sent["messages"][0]["content"]
     events = client.get(f"/attempts/{aid}/events").json()
     assert [e["type"] for e in events] == ["prompt", "token_usage", "agent_response"]
     usage_event = events[1]

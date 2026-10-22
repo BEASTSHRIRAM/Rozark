@@ -29,6 +29,8 @@ class EventType(str, Enum):
     paste_event="paste_event"; clipboard_event="clipboard_event"; tab_switch="tab_switch"
     token_usage="token_usage"; git_snapshot="git_snapshot"
     budget_exceeded="budget_exceeded"; session_submitted="session_submitted"; session_expired="session_expired"
+    # --- mentor (LangGraph) additions ---
+    mentor_guardrail="mentor_guardrail"
 
 DIFFICULTY_DEFAULTS={Difficulty.easy:(50,15), Difficulty.medium:(75,30), Difficulty.hard:(100,60)}
 
@@ -51,6 +53,9 @@ class ScoringSettings(BaseModel):
     format: ScoringFormat=ScoringFormat.junit
     scoring_command: Optional[str]=None
     scoring_output_files: list[str]=Field(default_factory=list)
+    # Test CASE names the candidate must never see (names/assertions stay
+    # hidden; only pass/total counts are exposed — see /tests/public).
+    hidden_tests: list[str]=Field(default_factory=list)
 class AgentConfig(BaseModel):
     allowed_agents: list[str]=Field(default_factory=lambda:["claude_code","codex"])
     model: Optional[str]=None
@@ -245,6 +250,15 @@ class FileWriteResponse(BaseModel):
     path: str
     size: int
 
+class TestCaseResult(BaseModel):
+    """One named test case from a scoring run (parsed from JUnit/TAP)."""
+    name: str
+    classname: str=""
+    status: str="passed"  # passed | failed | error | skipped
+    expected: str=""
+    received: str=""
+    message: str=""
+
 class ScoreRun(BaseModel):
     id: str
     attempt_id: str
@@ -254,6 +268,7 @@ class ScoreRun(BaseModel):
     source: str="none"  # fs_score | junit | tap | none
     stdout_tail: str=""
     ran_at: str=""
+    tests: list[TestCaseResult]=Field(default_factory=list)
 class ScoreRunHistory(BaseModel):
     attempt_id: str
     latest: Optional[ScoreRun]=None
@@ -272,6 +287,26 @@ class AgentChatResponse(BaseModel):
     tokens_in: int
     tokens_out: int
     budget: Optional[TokenBudgetSummary]=None
+    # Mentor structure (parsed from the SYMPTOM / WHERE / HINT reply).
+    symptom: str=""
+    where: str=""
+    hint: str=""
+    guardrail_intervened: bool=False
+
+class PublicTestItem(BaseModel):
+    name: str
+    status: str="passed"  # passed | failed | error | skipped
+    expected: str=""
+    received: str=""
+    message: str=""
+class HiddenTestsSummary(BaseModel):
+    total: int=0
+    passed: int=0
+class PublicTestsResponse(BaseModel):
+    attempt_id: str
+    run_id: Optional[str]=None
+    tests: list[PublicTestItem]=Field(default_factory=list)
+    hidden: HiddenTestsSummary=Field(default_factory=HiddenTestsSummary)
 
 class MeUpdate(BaseModel):
     name: Optional[str]=None
