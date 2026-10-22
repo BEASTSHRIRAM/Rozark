@@ -231,3 +231,22 @@ class EventsSummary(BaseModel):
     by_type: dict[str,int]=Field(default_factory=dict)
     by_actor: dict[str,int]=Field(default_factory=dict)
     by_stream: dict[str,int]=Field(default_factory=dict)
+
+class WorkspaceFile(BaseModel):
+    path: str
+    size: int
+    read_only: bool=False
+    hidden: bool=False
+class FileListResponse(BaseModel):
+    attempt_id: str
+    files: list[WorkspaceFile]=Field(default_factory=list)
+class FileContentResponse(BaseModel):
+    path: str
+    content: str
+    read_only: bool=False
+class FileWriteRequest(BaseModel):
+    path: str
+    content: str
+class FileWriteResponse(BaseModel):
+    path: str
+    size: int

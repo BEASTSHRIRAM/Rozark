@@ -13,7 +13,7 @@ from .seed import seed
 from .scoring import compute_functional_score, compute_collaboration
 from .recorder import recorder, BudgetHardStop
 from .auth import hash_password, verify_password, create_token, current_user_id
-from .sandbox import sandbox_manager, SandboxUnavailable, TerminalInputTap, TerminalOutputTap
+from .sandbox import sandbox_manager, SandboxUnavailable, TerminalInputTap, TerminalOutputTap, workspace_path_for
 
 app=FastAPI(title="Rozark API", version="0.1.0", description="AI-native technical assessment platform (MVP scaffold)")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -253,6 +253,90 @@ def get_budget(attempt_id: str):
     att=store.attempts.get(attempt_id)
     if not att: raise HTTPException(404,"Attempt not found")
     return recorder.budget_summary(att)
+
+# ---------------------------------------------------------------------------
+# Workspace files (B5): the editor's view of the sandbox workspace. Reads
+# and writes go through the recorder so file_view / file_edit land in the
+# same ordered event log as everything else. Hidden files are never
+# served; read-only files are never written.
+# ---------------------------------------------------------------------------
+
+def _ws_or_409(att: Attempt):
+    ws = workspace_path_for(att.id)
+    if not ws.is_dir():
+        raise HTTPException(409, "sandbox not started")
+    return ws
+
+def _safe_ws_path(ws, raw: str):
+    from pathlib import Path as _P
+    if not raw or not raw.strip():
+        raise HTTPException(400, "path is required")
+    target = (ws / raw).resolve()
+    root = ws.resolve()
+    if target != root and root not in target.parents:
+        raise HTTPException(400, "path escapes the workspace")
+    return target
+
+def _file_flags(att: Attempt, rel: str) -> tuple[bool, bool]:
+    ch = store.challenges.get(att.challenge_id)
+    if not ch: return (False, False)
+    def _hit(entries):
+        for e in entries:
+            e = e.strip("/")
+            if rel == e or rel.startswith(e + "/"): return True
+        return False
+    hidden = _hit(ch.ide_setup.hidden_files)
+    read_only = _hit(ch.ide_setup.read_only_files)
+    return (read_only, hidden)
+
+@app.get("/attempts/{attempt_id}/files", response_model=FileListResponse)
+def list_files(attempt_id: str):
+    att=store.attempts.get(attempt_id)
+    if not att: raise HTTPException(404,"Attempt not found")
+    ws=_ws_or_409(att)
+    files=[]
+    for path in sorted(ws.rglob("*")):
+        rel=path.relative_to(ws).as_posix()
+        parts=set(path.relative_to(ws).parts)
+        if ".git" in parts or "__pycache__" in parts or path.is_dir(): continue
+        ro, hid=_file_flags(att, rel)
+        files.append(WorkspaceFile(path=rel, size=path.stat().st_size, read_only=ro, hidden=hid))
+    return FileListResponse(attempt_id=att.id, files=files)
+
+@app.get("/attempts/{attempt_id}/files/content", response_model=FileContentResponse)
+def read_file_content(attempt_id: str, path: str = ""):
+    att=store.attempts.get(attempt_id)
+    if not att: raise HTTPException(404,"Attempt not found")
+    ws=_ws_or_409(att)
+    target=_safe_ws_path(ws, path)
+    rel=target.relative_to(ws.resolve()).as_posix()
+    ro, hid=_file_flags(att, rel)
+    if hid: raise HTTPException(403,"File is hidden")
+    if not target.is_file(): raise HTTPException(404,"File not found")
+    try: content=target.read_text(encoding="utf-8", errors="replace")
+    except OSError: raise HTTPException(404,"File not found")
+    try:
+        recorder.append(att, SessionEventCreate(type=EventType.file_view, actor=Actor.candidate, payload={"path": rel, "source": "editor"}))
+    except BudgetHardStop: pass
+    return FileContentResponse(path=rel, content=content, read_only=ro)
+
+@app.put("/attempts/{attempt_id}/files/content", response_model=FileWriteResponse)
+def write_file_content(attempt_id: str, body: FileWriteRequest):
+    att=store.attempts.get(attempt_id)
+    if not att: raise HTTPException(404,"Attempt not found")
+    ws=_ws_or_409(att)
+    if att.status=="submitted": raise HTTPException(409,"Attempt already submitted - session is frozen")
+    target=_safe_ws_path(ws, body.path)
+    rel=target.relative_to(ws.resolve()).as_posix()
+    ro, hid=_file_flags(att, rel)
+    if hid: raise HTTPException(403,"File is hidden")
+    if ro: raise HTTPException(403,"File is read-only")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(body.content, encoding="utf-8")
+    try:
+        recorder.append(att, SessionEventCreate(type=EventType.file_edit, actor=Actor.candidate, payload={"path": rel, "change": "modified", "source": "editor"}))
+    except BudgetHardStop: pass
+    return FileWriteResponse(path=rel, size=target.stat().st_size)
 
 # ---------------------------------------------------------------------------
 # Session lifecycle (B3): heartbeat + expiry. Expiry is lazy — checked on
