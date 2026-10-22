@@ -87,11 +87,12 @@ docker-compose.yml  Backend + frontend (SQLite persistence on a volume)
 
 ## Run it
 
-You need exactly one secret: an Anthropic API key. Everything else has a
-working default.
+You need exactly one secret: a Groq API key (free at groq.com). Everything
+else has a working default. An Anthropic key works as an alternative —
+it is used only when `GROQ_API_KEY` is not set.
 
 ```bash
-cp .env.example .env   # then put ANTHROPIC_API_KEY=... in .env
+cp .env.example .env   # then put GROQ_API_KEY=... in .env
 ```
 
 ### Option A — Docker Compose (one command)

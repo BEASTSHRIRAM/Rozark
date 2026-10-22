@@ -1,6 +1,6 @@
 # Rozark — full stack via Docker Compose.
 #
-#   cp .env.example .env   # then put ANTHROPIC_API_KEY in .env
+#   cp .env.example .env   # then put GROQ_API_KEY in .env
 #   docker compose up --build
 #   -> frontend http://localhost:3000   backend http://localhost:8000
 #   -> demo login: demo@rozark.dev / demo1234
@@ -27,6 +27,8 @@ services:
       ROZARK_DB_PATH: /data/rozark.db
       ROZARK_WORKSPACES: /data/workspaces
       # AI key passthrough from the host env / .env, with safe defaults.
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL: ${GROQ_MODEL:-llama-3.3-70b-versatile}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ROZARK_AI_API_KEY: ${ROZARK_AI_API_KEY:-}
       ROZARK_AI_MODEL: ${ROZARK_AI_MODEL:-claude-sonnet-4-5}

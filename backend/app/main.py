@@ -4,7 +4,9 @@ import os
 import select
 import threading
 
+import httpx
 from fastapi import FastAPI, HTTPException, Header, Response, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from .models import *
 from .store import store
@@ -161,6 +163,115 @@ def get_budget(attempt_id: str):
     att=store.attempts.get(attempt_id)
     if not att: raise HTTPException(404,"Attempt not found")
     return recorder.budget_summary(att)
+
+# ---------------------------------------------------------------------------
+# Agent budget proxy: the ONLY path from a candidate session to the model
+# API. The key never reaches the browser/sandbox; every call is recorded
+# (prompt -> token_usage -> agent_response) and the recorder's hard stop
+# refuses agent activity once the token cap is hit.
+#
+# Provider selection (first configured wins):
+#   1. Groq — GROQ_API_KEY set: OpenAI-compatible chat completions at
+#      api.groq.com, model from GROQ_MODEL (default llama-3.3-70b-versatile).
+#   2. Anthropic — ROZARK_AI_API_KEY or ANTHROPIC_API_KEY set (fallback).
+# Neither -> /agent/status reports configured=False and chat returns a
+# graceful 503; the rest of the platform keeps working.
+# ---------------------------------------------------------------------------
+
+GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
+DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
+DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-5"
+
+def _agent_provider(challenge=None):
+    """Return (provider, api_key, model) for the first configured provider.
+
+    Unconfigured returns provider "groq" (the default Rozark now expects)
+    with an empty key, so /agent/status has a stable shape.
+    """
+    groq_key = os.environ.get("GROQ_API_KEY") or ""
+    if groq_key:
+        return "groq", groq_key, os.environ.get("GROQ_MODEL") or DEFAULT_GROQ_MODEL
+    anthropic_key = os.environ.get("ROZARK_AI_API_KEY") or os.environ.get("ANTHROPIC_API_KEY") or ""
+    if anthropic_key:
+        if challenge is not None and challenge.agent_config.model:
+            model = challenge.agent_config.model
+        else:
+            model = os.environ.get("ROZARK_AI_MODEL") or DEFAULT_ANTHROPIC_MODEL
+        return "anthropic", anthropic_key, model
+    return "groq", "", os.environ.get("GROQ_MODEL") or DEFAULT_GROQ_MODEL
+
+def _usage_int(value) -> int:
+    try: return max(0, int(value or 0))
+    except (TypeError, ValueError): return 0
+
+def _provider_post(url, headers, payload):
+    try:
+        http = httpx.Client(timeout=60)
+        return http.post(url, headers=headers, json=payload)
+    except httpx.HTTPError as e:
+        raise HTTPException(502, f"Agent provider request failed: {e}")
+
+def _provider_json(resp) -> dict:
+    if resp.status_code != 200:
+        raise HTTPException(502, f"Agent provider returned HTTP {resp.status_code}")
+    try: return resp.json()
+    except ValueError: raise HTTPException(502, "Agent provider returned invalid JSON")
+
+def _call_groq(key, model, system_prompt, prompt):
+    resp = _provider_post(GROQ_API_URL,
+                          {"Authorization": f"Bearer {key}", "content-type": "application/json"},
+                          {"model": model, "max_tokens": 1024,
+                           "messages": [{"role": "system", "content": system_prompt},
+                                        {"role": "user", "content": prompt}]})
+    data = _provider_json(resp)
+    choices = data.get("choices") or []
+    text = ""
+    if choices and isinstance(choices[0], dict):
+        text = str((choices[0].get("message") or {}).get("content") or "")
+    usage = data.get("usage", {}) or {}
+    return text, _usage_int(usage.get("prompt_tokens")), _usage_int(usage.get("completion_tokens"))
+
+def _call_anthropic(key, model, system_prompt, prompt):
+    resp = _provider_post(ANTHROPIC_API_URL,
+                          {"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+                          {"model": model, "max_tokens": 1024, "system": system_prompt,
+                           "messages": [{"role": "user", "content": prompt}]})
+    data = _provider_json(resp)
+    text = "".join(str(b.get("text", "")) for b in data.get("content", []) if isinstance(b, dict) and b.get("type") == "text")
+    usage = data.get("usage", {}) or {}
+    return text, _usage_int(usage.get("input_tokens")), _usage_int(usage.get("output_tokens"))
+
+@app.get("/agent/status", response_model=AgentStatus)
+def agent_status():
+    provider, key, model = _agent_provider()
+    return AgentStatus(configured=bool(key), provider=provider, model=model)
+
+@app.post("/attempts/{attempt_id}/agent/chat", response_model=AgentChatResponse)
+def agent_chat(attempt_id: str, body: AgentChatRequest):
+    att = store.attempts.get(attempt_id)
+    if not att: raise HTTPException(404, "Attempt not found")
+    if att.status == "submitted": raise HTTPException(409, "Attempt already submitted - session is frozen")
+    if att.budget_hard_stop:
+        raise HTTPException(403, f"Token budget hard stop is active for attempt {att.id} ({att.tokens_used}/{att.token_budget} tokens used).")
+    ch = store.challenges.get(att.challenge_id)
+    provider, key, model = _agent_provider(ch)
+    if not key:
+        return JSONResponse(status_code=503, content={"detail": "Agent proxy is not configured: set GROQ_API_KEY (or ANTHROPIC_API_KEY) on the backend.", "code": "agent_not_configured"})
+    try:
+        recorder.append(att, SessionEventCreate(type=EventType.prompt, actor=Actor.candidate, payload={"text": body.prompt, "phase": body.phase, "mode": body.mode, "via": "agent_proxy"}))
+    except BudgetHardStop as e:
+        raise HTTPException(403, str(e))
+    system_prompt = (f"You are an AI coding agent helping a candidate inside a recorded Rozark assessment sandbox. "
+                     f"Challenge: {ch.title if ch else att.challenge_id}. "
+                     "Your prompts, tool use and responses are recorded and scored as collaboration evidence. Be concise and concrete.")
+    if provider == "groq":
+        text, tokens_in, tokens_out = _call_groq(key, model, system_prompt, body.prompt)
+    else:
+        text, tokens_in, tokens_out = _call_anthropic(key, model, system_prompt, body.prompt)
+    recorder.append(att, SessionEventCreate(type=EventType.token_usage, actor=Actor.system, payload={"tokens_in": tokens_in, "tokens_out": tokens_out, "phase": body.phase, "via": "agent_proxy", "provider": provider, "model": model}))
+    recorder.append(att, SessionEventCreate(type=EventType.agent_response, actor=Actor.agent, payload={"text": text, "phase": body.phase, "via": "agent_proxy"}))
+    return AgentChatResponse(response_text=text, tokens_in=tokens_in, tokens_out=tokens_out, budget=recorder.budget_summary(att))
 
 # ---------------------------------------------------------------------------
 # Live sandbox (app/sandbox.py, docs/SANDBOX.md). Start materialises an
